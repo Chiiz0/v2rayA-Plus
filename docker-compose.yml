@@ -1,0 +1,20 @@
+version: "3"
+services:
+  v2raya-plus:
+    image: v2raya-plus:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    privileged: true
+    ports:
+      - "2017:2017"
+    restart: always
+    environment:
+      - V2RAYA_CONFIG=/etc/v2raya-plus
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - /etc/resolv.conf:/etc/resolv.conf
+      - /var/run/docker.sock:/var/run/docker.sock
+      - v2raya-plus-data:/etc/v2raya-plus
+volumes:
+  v2raya-plus-data:
