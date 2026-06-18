@@ -63,7 +63,6 @@ services:
       - V2RAYA_CONFIG=/etc/v2raya-plus
     volumes:
       - /lib/modules:/lib/modules:ro
-      - /etc/resolv.conf:/etc/resolv.conf
       - /var/run/docker.sock:/var/run/docker.sock  # Docker 代理功能所需
       - v2raya-plus-data:/etc/v2raya-plus           # 持久化配置卷
 volumes:
