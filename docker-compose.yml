@@ -1,4 +1,3 @@
-version: "3"
 services:
   v2raya-plus:
     image: v2raya-plus:local
