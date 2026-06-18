@@ -28,7 +28,7 @@
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/v2raya-plus.git
+git clone https://github.com/Chiiz0/v2raya-plus.git
 cd v2raya-plus
 
 # 2. Build and start
