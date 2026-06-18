@@ -1,6 +1,9 @@
 services:
   v2raya-plus:
-    image: ghcr.io/chiiz0/v2raya-plus:latest
+    image: v2raya-plus:local
+    build:
+      context: .
+      dockerfile: Dockerfile
     privileged: true
     ports:
       - "2017:2017"
