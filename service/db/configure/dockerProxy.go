@@ -8,11 +8,13 @@ import (
 )
 
 type DockerProxy struct {
-	Port          int    `json:"port"`
-	Which         Which  `json:"which"`
-	ServerName    string `json:"serverName"`
-	ContainerName string `json:"containerName"`
-	Status        string `json:"status"`
+	Port            int    `json:"port"`
+	Which           Which  `json:"which"`
+	FrontWhich      *Which `json:"frontWhich,omitempty"`
+	ServerName      string `json:"serverName"`
+	FrontServerName string `json:"frontServerName,omitempty"`
+	ContainerName   string `json:"containerName"`
+	Status          string `json:"status"`
 }
 
 func GetDockerProxies() ([]DockerProxy, error) {

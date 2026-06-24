@@ -377,5 +377,7 @@ export default {
     createTitle: "Create Docker Proxy",
     createSuccess: "Docker proxy created successfully",
     deleteSuccess: "Docker proxy released successfully",
+    frontNodeLabel: "Front Node (Optional)",
+    frontNodeNone: "None",
   }
 };

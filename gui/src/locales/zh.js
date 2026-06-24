@@ -380,5 +380,7 @@ export default {
     createTitle: "创建 Docker 代理",
     createSuccess: "Docker 代理创建成功",
     deleteSuccess: "Docker 代理已释放",
+    frontNodeLabel: "前置节点 (可选)",
+    frontNodeNone: "无",
   }
 };

@@ -65,7 +65,7 @@ func writeConfigToVolume(volumeName string, configBytes []byte) error {
 	return nil
 }
 
-func CreateDockerProxy(which configure.Which, port int) error {
+func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port int) error {
 	// 1. Check if the port is already configured in DB
 	proxies, _ := configure.GetDockerProxies()
 	for _, p := range proxies {
@@ -97,6 +97,57 @@ func CreateDockerProxy(which configure.Which, port int) error {
 		return fmt.Errorf("failed to generate server configuration: %w", err)
 	}
 
+	var frontServerName string
+	var outbounds []coreObj.OutboundObject
+
+	if frontWhich != nil {
+		frontSr, err := frontWhich.LocateServerRaw()
+		if err != nil {
+			return fmt.Errorf("failed to locate front server: %w", err)
+		}
+		frontServerName = frontSr.ServerObj.GetName()
+
+		frontC, err := frontSr.ServerObj.Configuration(serverObj.PriorInfo{
+			Variant:     variant,
+			CoreVersion: coreVersion,
+			Tag:         "pre-proxy",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to generate front server configuration: %w", err)
+		}
+
+		// Find the target proxy's final outbound to point to "pre-proxy"
+		var leafOutbound *coreObj.OutboundObject = &c.CoreOutbound
+		for {
+			if leafOutbound.ProxySettings != nil && leafOutbound.ProxySettings.Tag != "" {
+				found := false
+				for i := range c.ExtraOutbounds {
+					if c.ExtraOutbounds[i].Tag == leafOutbound.ProxySettings.Tag {
+						leafOutbound = &c.ExtraOutbounds[i]
+						found = true
+						break
+					}
+				}
+				if !found {
+					break
+				}
+			} else {
+				break
+			}
+		}
+		leafOutbound.ProxySettings = &coreObj.ProxySettings{
+			Tag: "pre-proxy",
+		}
+
+		outbounds = append(outbounds, c.CoreOutbound)
+		outbounds = append(outbounds, c.ExtraOutbounds...)
+		outbounds = append(outbounds, frontC.CoreOutbound)
+		outbounds = append(outbounds, frontC.ExtraOutbounds...)
+	} else {
+		outbounds = append(outbounds, c.CoreOutbound)
+		outbounds = append(outbounds, c.ExtraOutbounds...)
+	}
+
 	// 5. Construct config JSON
 	config := SimpleConfig{
 		Inbounds: []SimpleInbound{
@@ -111,7 +162,7 @@ func CreateDockerProxy(which configure.Which, port int) error {
 				Tag: "socks-in",
 			},
 		},
-		Outbounds: append([]coreObj.OutboundObject{c.CoreOutbound}, c.ExtraOutbounds...),
+		Outbounds: outbounds,
 		Routing: SimpleRouting{
 			Rules: []SimpleRoutingRule{
 				{
@@ -185,11 +236,13 @@ func CreateDockerProxy(which configure.Which, port int) error {
 
 	// 7. Save to DB
 	proxy := configure.DockerProxy{
-		Port:          port,
-		Which:         which,
-		ServerName:    sr.ServerObj.GetName(),
-		ContainerName: containerName,
-		Status:        "running",
+		Port:            port,
+		Which:           which,
+		FrontWhich:      frontWhich,
+		ServerName:      sr.ServerObj.GetName(),
+		FrontServerName: frontServerName,
+		ContainerName:   containerName,
+		Status:          "running",
 	}
 	err = configure.SaveDockerProxy(proxy)
 	if err != nil {

@@ -20,8 +20,9 @@ func GetDockerProxies(ctx *gin.Context) {
 }
 
 type postDockerProxyReq struct {
-	Which configure.Which `json:"which"`
-	Port  int             `json:"port"`
+	Which      configure.Which  `json:"which"`
+	FrontWhich *configure.Which `json:"frontWhich,omitempty"`
+	Port       int              `json:"port"`
 }
 
 func PostDockerProxy(ctx *gin.Context) {
@@ -32,7 +33,7 @@ func PostDockerProxy(ctx *gin.Context) {
 		common.ResponseError(ctx, fmt.Errorf("bad request: %w", err))
 		return
 	}
-	err = service.CreateDockerProxy(req.Which, req.Port)
+	err = service.CreateDockerProxy(req.Which, req.FrontWhich, req.Port)
 	if err != nil {
 		log.Error("CreateDockerProxy error: %v", err)
 		common.ResponseError(ctx, err)
