@@ -21,7 +21,7 @@ axios.defaults.timeout = 60 * 1000; // timeout: 60秒
 
 axios.interceptors.request.use(
   (config) => {
-    if (localStorage.hasOwnProperty("token")) {
+    if (Object.prototype.hasOwnProperty.call(localStorage, "token")) {
       config.headers.Authorization = `${localStorage["token"]}`;
       config.headers["X-V2raya-Request-Id"] = nanoid();
     }

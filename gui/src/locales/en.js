@@ -60,7 +60,8 @@ export default {
     timeLastUpdate: "Datetime of Last Update",
     numberServers: "Number of Servers",
     subscription: "Subscription",
-    autoSelect: "Automatically connect to new servers from the subscription after an automatic update of the subscription",
+    autoSelect:
+      "Automatically connect to new servers from the subscription after an automatic update of the subscription",
   },
   operations: {
     name: "Operations",
@@ -92,7 +93,7 @@ export default {
     no: "No",
     switchSite: "Switch to alternate site",
     addOutbound: "Add an outbound",
-    domainsExcluded: "Domains Excluded"
+    domainsExcluded: "Domains Excluded",
   },
   register: {
     title: "Create an admin account first",
@@ -145,7 +146,8 @@ export default {
       leastPing: "Least Latency First",
     },
     messages: {
-      inboundSniffing: "Sniff inbound traffic. If it is not turned on, some traffic may not be diverted correctly.",
+      inboundSniffing:
+        "Sniff inbound traffic. If it is not turned on, some traffic may not be diverted correctly.",
       gfwlist:
         "Based on modified time of file which sometimes is after latest version online.",
       transparentProxy:
@@ -279,8 +281,7 @@ export default {
       "Be sure to <b>DELETE</b> those servers/subscriptions? It is not reversible.",
   },
   latency: {
-    message:
-      "Latency tests can take several minutes. Wait patiently please.",
+    message: "Latency tests can take several minutes. Wait patiently please.",
   },
   version: {
     higherVersionNeeded:
@@ -333,34 +334,34 @@ export default {
     title: "White IP Groups",
     messages: [
       "The selected IP group will bypass the XRay/V2Ray core and go directly outbound (through Nftables/Iptables). Please ensure your DNS server is reliable and free of contamination so that clients can resolve the correct IPs.",
-      "It's best to use this feature when your system is using Nftables, as iptables may experience performance issues when adding a large number of IPs."
+      "It's best to use this feature when your system is using Nftables, as iptables may experience performance issues when adding a large number of IPs.",
     ],
     formName1: "Hold down Ctrl to select multiple items.",
     formName2: "Custom IPs (one per line, standard CIDR format)",
     formPlaceholder2: "172.30.0.0/16\nfd00:aaaa:bbbb::/48",
-    invalidCustomIps:"Invalid Custom IPs",
-    cn: 'China Mainland',
-    private: 'Private',
-    us: 'United States',
-    cloudflare: 'Cloudflare',
+    invalidCustomIps: "Invalid Custom IPs",
+    cn: "China Mainland",
+    private: "Private",
+    us: "United States",
+    cloudflare: "Cloudflare",
   },
   domainsExcluded: {
     title: "Domains Excluded",
     messages: [
-      "A list of domain names. If the traffic sniffing result matches a domain name in this list, the target address will not be reset."
+      "A list of domain names. If the traffic sniffing result matches a domain name in this list, the target address will not be reset.",
     ],
     formName: "Domains Excluded List",
-    formPlaceholder: "courier.push.apple.com\nMijia Cloud\ndlg.io.mi.com"
+    formPlaceholder: "courier.push.apple.com\nMijia Cloud\ndlg.io.mi.com",
   },
   gfwList: {
     title: "Update GFWList",
     messages: [
       "If accessing GitHub is difficult in your current environment, you can download the latest GFWList（geosite.dat）from GitHub（https://github.com/v2rayA/dist-v2ray-rules-dat）, upload it to your server, and then enter your server address here to download it.",
       "If the input form is empty it will automatically download from Github, otherwise it will download using the custom link",
-      "Please note: Wrong file may cause service startup failure. If the service cannot be started after downloading, you can click the Delete GFWList button"
+      "Please note: Wrong file may cause service startup failure. If the service cannot be started after downloading, you can click the Delete GFWList button",
     ],
     formName: "Custom Download Link",
-    wrongCustomLink: "wrong custom download link"
+    wrongCustomLink: "wrong custom download link",
   },
   dockerProxies: {
     tabLabel: "Docker Proxies",
@@ -388,5 +389,5 @@ export default {
     deleteSuccess: "Docker proxy released successfully",
     frontNodeLabel: "Front Node (Optional)",
     frontNodeNone: "None",
-  }
+  },
 };

@@ -35,6 +35,11 @@ module.exports = {
           }),
         ],
       },
+      performance: {
+        hints: isProd ? "warning" : false,
+        maxAssetSize: 512 * 1024,
+        maxEntrypointSize: 512 * 1024,
+      },
       plugins: [
         new webpack.DefinePlugin({
           apiRoot: '`${localStorage["backendAddress"]}/api`',

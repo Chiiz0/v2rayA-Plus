@@ -91,7 +91,7 @@ export default {
     no: "否",
     switchSite: "切换至备用站点",
     addOutbound: "新增一个出站 (outbound)",
-    domainsExcluded: "排除域名"
+    domainsExcluded: "排除域名",
   },
   register: {
     title: "初来乍到，创建一个管理员账号",
@@ -331,39 +331,39 @@ export default {
     seconds: "秒",
     autoScoll: "自动滚动",
   },
-  
+
   tproxyWhiteIpGroups: {
     title: "直通白名单IP组",
     messages: [
       "选中的IP组将会不经过XRay/V2Ray核心直接出站（通过Nftables/Iptables直接转发），请确保你的DNS服务器足够可靠无污染能使客户端能解析到正确的IP",
-      "最好系统使用Nftables时使用此功能，Iptables可能在添加大量IP时存在性能问题"
+      "最好系统使用Nftables时使用此功能，Iptables可能在添加大量IP时存在性能问题",
     ],
     formName1: "按住Ctrl可以多选",
     formName2: "自定义IP（一行一个，标准CIDR格式）",
     formPlaceholder2: "172.30.0.0/16\nfd00:dead:beef::/48",
-    invalidCustomIps:"自定义IP格式错误",
-    cn: '中国大陆',
-    private: '私网网段',
-    us: '美国',
-    cloudflare: 'Cloudflare',
+    invalidCustomIps: "自定义IP格式错误",
+    cn: "中国大陆",
+    private: "私网网段",
+    us: "美国",
+    cloudflare: "Cloudflare",
   },
   domainsExcluded: {
     title: "排除域名",
     messages: [
-      "一个域名列表，如果流量探测结果在这个列表中时，将 不会 重置目标地址。"
+      "一个域名列表，如果流量探测结果在这个列表中时，将 不会 重置目标地址。",
     ],
     formName: "排除域名列表",
-    formPlaceholder: "courier.push.apple.com\nMijia Cloud\ndlg.io.mi.com"
+    formPlaceholder: "courier.push.apple.com\nMijia Cloud\ndlg.io.mi.com",
   },
   gfwList: {
     title: "更新GFWList",
     messages: [
       "如果当前环境访问Github困难，你可以从此处（https://github.com/v2rayA/dist-v2ray-rules-dat）手动下载最新GFWList（geosite.dat），上传到你的服务器，然后填写你的服务器链接进行下载",
       "如果不填写自定义下载链接输入框则自动从Github进行下载",
-      "注意：错误的文件可能导致服务启动失败，如果更新后服务器启动失败，你可以点击删除按钮删除下载的GFWList"
+      "注意：错误的文件可能导致服务启动失败，如果更新后服务器启动失败，你可以点击删除按钮删除下载的GFWList",
     ],
     formName: "自定义下载链接",
-    wrongCustomLink: "错误的自定义下载链接"
+    wrongCustomLink: "错误的自定义下载链接",
   },
   dockerProxies: {
     tabLabel: "Docker 代理",
@@ -391,5 +391,5 @@ export default {
     deleteSuccess: "Docker 代理已释放",
     frontNodeLabel: "前置节点 (可选)",
     frontNodeNone: "无",
-  }
+  },
 };

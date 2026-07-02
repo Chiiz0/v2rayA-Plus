@@ -917,10 +917,8 @@
 <script>
 import { locateServer, handleResponse } from "@/assets/js/utils";
 import CONST from "@/assets/js/const";
-import QRCode from "qrcode";
 import { Decoder } from "@nuintun/qrcode";
 import ClipboardJS from "clipboard";
-import { Base64 } from "js-base64";
 import ModalServer from "@/components/modalServer";
 import ModalSubscription from "@/components/modalSubcription";
 import ModalSharing from "@/components/modalSharing";
@@ -929,7 +927,7 @@ import axios from "@/plugins/axios";
 import * as dayjs from "dayjs";
 
 export default {
-  name: "Node",
+  name: "NodeView",
   components: { ModalSubscription, ModalServer },
   filters: {
     unix2datetime(x) {
@@ -1046,7 +1044,10 @@ export default {
             info.which.sub === x.which.sub
           ) {
             for (const k in info) {
-              if (k === "which" || !info.hasOwnProperty(k)) {
+              if (
+                k === "which" ||
+                !Object.prototype.hasOwnProperty.call(info, k)
+              ) {
                 continue;
               }
               x.info[k] = info[k];

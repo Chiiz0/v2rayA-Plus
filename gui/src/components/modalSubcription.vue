@@ -6,22 +6,21 @@
     <section class="modal-card-body">
       <b-field label="SUBSCRIPTION">
         <b-input
-          v-model="which.address"
+          v-model="form.address"
           type="textarea"
           :placeholder="$t('subscription.subscription')"
         />
       </b-field>
       <b-field label="REMARKS">
         <b-input
-          v-model="which.remarks"
+          v-model="form.remarks"
           :placeholder="$t('subscription.remarks')"
         />
       </b-field>
       <b-field label="AUTO-SELECT">
-        <b-checkbox
-	  v-model="which.autoSelect"
-	  >{{ $t("subscription.autoSelect") }}
-	</b-checkbox>
+        <b-checkbox v-model="form.autoSelect"
+          >{{ $t("subscription.autoSelect") }}
+        </b-checkbox>
       </b-field>
     </section>
     <footer class="modal-card-foot flex-end">
@@ -46,9 +45,33 @@ export default {
       },
     },
   },
+  data() {
+    return {
+      form: {
+        address: "",
+        remarks: "",
+        autoSelect: false,
+      },
+    };
+  },
+  watch: {
+    which: {
+      immediate: true,
+      handler(value) {
+        this.form = Object.assign(
+          {
+            address: "",
+            remarks: "",
+            autoSelect: false,
+          },
+          value || {}
+        );
+      },
+    },
+  },
   methods: {
     handleClickSubmit() {
-      this.$emit("submit", this.which);
+      this.$emit("submit", Object.assign({}, this.form));
     },
   },
 };

@@ -36,7 +36,9 @@
       </button>
       <button class="button is-primary" @click="handleClickSubmit">
         {{
-          downloadLink == "" ? $t("operations.autoUpdate") : $t("operations.manualUpdate")
+          downloadLink == ""
+            ? $t("operations.autoUpdate")
+            : $t("operations.manualUpdate")
         }}
       </button>
     </footer>
@@ -46,7 +48,7 @@
 import { handleResponse } from "@/assets/js/utils";
 
 export default {
-  name: "modalUpdateGfwList",
+  name: "ModalUpdateGfwList",
   data: () => ({
     disableDeleteBtn: false,
     downloadLink: "",

@@ -32,7 +32,7 @@
 import { handleResponse } from "@/assets/js/utils";
 
 export default {
-  name: "modalDomainsExcluded",
+  name: "ModalDomainsExcluded",
   data: () => ({
     domains: "",
   }),
