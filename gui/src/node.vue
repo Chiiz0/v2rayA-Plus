@@ -578,7 +578,11 @@
           </b-field>
         </b-tab-item>
         <b-tab-item :label="$t('dockerProxies.tabLabel')">
-          <b-field :label="$t('dockerProxies.fieldLabel', { count: dockerProxies.length })">
+          <b-field
+            :label="
+              $t('dockerProxies.fieldLabel', { count: dockerProxies.length })
+            "
+          >
             <b-table
               checkable
               :checked-rows.sync="checkedRows"
@@ -586,17 +590,42 @@
               :data="dockerProxies"
               default-sort="port"
             >
-              <b-table-column v-slot="props" field="port" :label="$t('dockerProxies.colPort')" numeric sortable>
+              <b-table-column
+                v-slot="props"
+                field="port"
+                :label="$t('dockerProxies.colPort')"
+                numeric
+                sortable
+              >
                 {{ props.row.port }}
               </b-table-column>
-              <b-table-column v-slot="props" field="serverName" :label="$t('dockerProxies.colServer')" sortable>
+              <b-table-column
+                v-slot="props"
+                field="serverName"
+                :label="$t('dockerProxies.colServer')"
+                sortable
+              >
                 {{ props.row.serverName }}
-                <span v-if="props.row.frontServerName" class="tag is-light is-info" style="margin-left: 4px;">via {{ props.row.frontServerName }}</span>
+                <span
+                  v-if="props.row.frontServerName"
+                  class="tag is-light is-info"
+                  style="margin-left: 4px"
+                  >via {{ props.row.frontServerName }}</span
+                >
               </b-table-column>
-              <b-table-column v-slot="props" field="containerName" :label="$t('dockerProxies.colContainer')">
+              <b-table-column
+                v-slot="props"
+                field="containerName"
+                :label="$t('dockerProxies.colContainer')"
+              >
                 {{ props.row.containerName }}
               </b-table-column>
-              <b-table-column v-slot="props" field="pingLatency" :label="$t('server.latency')" sortable>
+              <b-table-column
+                v-slot="props"
+                field="pingLatency"
+                :label="$t('server.latency')"
+                sortable
+              >
                 <span
                   v-if="props.row.pingLatency"
                   :class="{
@@ -609,19 +638,54 @@
                 </span>
                 <span v-else>-</span>
               </b-table-column>
-              <b-table-column v-slot="props" field="status" :label="$t('dockerProxies.colStatus')">
-                <span class="tag is-success" v-if="props.row.status === 'running'">{{ $t('dockerProxies.statusRunning') }}</span>
-                <span class="tag is-danger" v-else>{{ props.row.status }}</span>
+              <b-table-column
+                v-slot="props"
+                field="status"
+                :label="$t('dockerProxies.colStatus')"
+              >
+                <span
+                  v-if="props.row.status === 'running'"
+                  class="tag is-success"
+                  >{{ $t("dockerProxies.statusRunning") }}</span
+                >
+                <span
+                  v-else-if="props.row.status === 'paused'"
+                  class="tag is-warning"
+                  >{{ $t("dockerProxies.statusPaused") }}</span
+                >
+                <span v-else class="tag is-danger">{{ props.row.status }}</span>
               </b-table-column>
-              <b-table-column v-slot="props" :label="$t('dockerProxies.colOperations')" width="150">
+              <b-table-column
+                v-slot="props"
+                :label="$t('dockerProxies.colOperations')"
+                width="220"
+              >
                 <b-button
                   size="is-small"
-                  icon-left="iconfont icon-delete"
-                  type="is-danger"
+                  type="is-info"
                   outlined
-                  @click="handleDeleteDockerProxy(props.row)"
+                  @click="handleEditDockerProxy(props.row)"
                 >
-                  {{ $t('dockerProxies.btnRelease') }}
+                  {{ $t("dockerProxies.btnEdit") }}
+                </b-button>
+                <b-button
+                  size="is-small"
+                  :type="
+                    props.row.status === 'running' ? 'is-warning' : 'is-success'
+                  "
+                  outlined
+                  style="margin-left: 6px"
+                  @click="
+                    props.row.status === 'running'
+                      ? handlePauseDockerProxy(props.row)
+                      : handleResumeDockerProxy(props.row)
+                  "
+                >
+                  {{
+                    props.row.status === "running"
+                      ? $t("dockerProxies.btnPause")
+                      : $t("dockerProxies.btnResume")
+                  }}
                 </b-button>
               </b-table-column>
             </b-table>
@@ -666,17 +730,37 @@
     >
       <div class="modal-card" style="width: 450px">
         <header class="modal-card-head">
-          <p class="modal-card-title">{{ $t("dockerProxies.createTitle") }}</p>
+          <p class="modal-card-title">
+            {{
+              dockerProxyEditing
+                ? $t("dockerProxies.updateTitle")
+                : $t("dockerProxies.createTitle")
+            }}
+          </p>
         </header>
         <section class="modal-card-body">
-          <b-field :label="$t('dockerProxies.colServer')">
-            <b-input :value="dockerProxyTargetName" disabled></b-input>
+          <b-field :label="$t('dockerProxies.proxyNodeLabel')">
+            <b-select v-model="dockerProxyTargetWhich" expanded>
+              <option
+                v-for="s in dockerProxyTargetOptions"
+                :key="
+                  s._type +
+                  '-' +
+                  (s.sub !== undefined ? s.sub + '-' : '') +
+                  s.id
+                "
+                :value="s"
+              >
+                {{ formatDockerProxyOption(s) }}
+              </option>
+            </b-select>
           </b-field>
           <b-field :label="$t('dockerProxies.portLabel')">
             <b-input
-              type="number"
               v-model.number="dockerProxyPort"
+              type="number"
               :placeholder="$t('dockerProxies.portPlaceholder')"
+              :disabled="dockerProxyEditing"
               min="1"
               max="65535"
               required
@@ -684,18 +768,25 @@
           </b-field>
           <b-field :label="$t('dockerProxies.frontNodeLabel')">
             <b-select v-model="dockerProxyFrontWhich" expanded>
-              <option :value="null">{{ $t('dockerProxies.frontNodeNone') }}</option>
+              <option :value="null">
+                {{ $t("dockerProxies.frontNodeNone") }}
+              </option>
               <option
                 v-for="s in dockerProxyFrontOptions"
-                :key="s._type + '-' + (s.sub !== undefined ? s.sub + '-' : '') + s.id"
+                :key="
+                  s._type +
+                  '-' +
+                  (s.sub !== undefined ? s.sub + '-' : '') +
+                  s.id
+                "
                 :value="s"
               >
-                [{{ (s.net || '').toUpperCase() }}] {{ s.name }} ({{ s.address }})
+                {{ formatDockerProxyOption(s) }}
               </option>
             </b-select>
           </b-field>
         </section>
-        <footer class="modal-card-foot" style="justify-content: flex-end;">
+        <footer class="modal-card-foot" style="justify-content: flex-end">
           <b-button label="Cancel" @click="showModalDockerProxy = false" />
           <b-button
             label="OK"
@@ -891,8 +982,8 @@ export default {
       modalServerReadOnly: false,
       showModalSubscription: false,
       showModalDockerProxy: false,
+      dockerProxyEditing: false,
       dockerProxyTargetWhich: null,
-      dockerProxyTargetName: "",
       dockerProxyPort: null,
       dockerProxyFrontWhich: null,
       dockerProxySubmitting: false,
@@ -909,52 +1000,17 @@ export default {
     loadBalanceValid() {
       return localStorage["loadBalanceValid"] === "true";
     },
+    dockerProxyTargetOptions() {
+      return this.collectDockerProxyOptions();
+    },
     dockerProxyFrontOptions() {
       if (!this.dockerProxyTargetWhich) {
         return [];
       }
-      const list = [];
       const target = this.dockerProxyTargetWhich;
-      const isTarget = (s) => {
-        return s.id === target.id &&
-               s._type === target._type &&
-               (target._type !== "subscriptionServer" || s.sub === target.sub);
-      };
-
-      if (this.tableData && this.tableData.servers) {
-        this.tableData.servers.forEach((s) => {
-          const item = {
-            _type: "server",
-            id: s.id,
-            name: s.name || s.address,
-            address: s.address,
-            net: s.net
-          };
-          if (!isTarget(item)) {
-            list.push(item);
-          }
-        });
-      }
-      if (this.tableData && this.tableData.subscriptions) {
-        this.tableData.subscriptions.forEach((sub, subIdx) => {
-          if (sub.servers) {
-            sub.servers.forEach((s) => {
-              const item = {
-                _type: "subscriptionServer",
-                id: s.id,
-                sub: subIdx,
-                name: s.name || s.address,
-                address: s.address,
-                net: s.net
-              };
-              if (!isTarget(item)) {
-                list.push(item);
-              }
-            });
-          }
-        });
-      }
-      return list;
+      return this.collectDockerProxyOptions().filter(
+        (s) => !this.isSameDockerProxyWhich(s, target)
+      );
     },
   },
   watch: {
@@ -963,6 +1019,16 @@ export default {
     },
     outbound() {
       this.updateConnectView();
+    },
+    dockerProxyTargetWhich() {
+      if (
+        this.isSameDockerProxyWhich(
+          this.dockerProxyTargetWhich,
+          this.dockerProxyFrontWhich
+        )
+      ) {
+        this.dockerProxyFrontWhich = null;
+      }
     },
     tableData(x) {
       for (const sub of x.subscriptions) {
@@ -1454,7 +1520,9 @@ export default {
       if (this.tab === 2 + this.tableData.subscriptions.length) {
         this.$buefy.dialog.confirm({
           title: this.$t("dockerProxies.btnRelease"),
-          message: `${this.$t("dockerProxies.btnRelease")} ${this.checkedRows.length} proxy port(s)?`,
+          message: `${this.$t("dockerProxies.btnRelease")} ${
+            this.checkedRows.length
+          } proxy port(s)?`,
           confirmText: this.$t("dockerProxies.btnRelease"),
           cancelText: this.$t("operations.cancel"),
           type: "is-danger",
@@ -1476,32 +1544,37 @@ export default {
     },
     releaseSelectedDockerProxies() {
       this.$buefy.toast.open({
-        message: this.$t('common.checkRunning'),
-        type: 'is-info'
+        message: this.$t("common.checkRunning"),
+        type: "is-info",
       });
       const promises = this.checkedRows.map((row) => {
         return this.$axios({
-          method: 'DELETE',
-          url: apiRoot + '/dockerProxy',
+          method: "DELETE",
+          url: apiRoot + "/dockerProxy",
           data: {
-            port: row.port
-          }
+            port: row.port,
+          },
         });
       });
-      Promise.all(promises).then(() => {
-        this.$buefy.toast.open({
-          message: this.$t('dockerProxies.deleteSuccess'),
-          type: 'is-success'
+      Promise.all(promises)
+        .then(() => {
+          this.$buefy.toast.open({
+            message: this.$t("dockerProxies.deleteSuccess"),
+            type: "is-success",
+          });
+          this.checkedRows = [];
+          this.fetchDockerProxies();
+        })
+        .catch((err) => {
+          this.$buefy.toast.open({
+            message:
+              this.$t("common.fail") +
+              ": " +
+              (err.response?.data?.message || err.message),
+            type: "is-danger",
+          });
+          this.fetchDockerProxies();
         });
-        this.checkedRows = [];
-        this.fetchDockerProxies();
-      }).catch((err) => {
-        this.$buefy.toast.open({
-          message: this.$t('common.fail') + ': ' + (err.response?.data?.message || err.message),
-          type: 'is-danger'
-        });
-        this.fetchDockerProxies();
-      });
     },
     handleClickAboutConnection(row, sub) {
       let cancel;
@@ -1582,7 +1655,9 @@ export default {
     handleClickLatency(ping) {
       let touches;
       if (this.tab === 2 + this.tableData.subscriptions.length) {
-        this.checkedRows.forEach((x) => this.$set(x, "pingLatency", "testing..."));
+        this.checkedRows.forEach((x) =>
+          this.$set(x, "pingLatency", "testing...")
+        );
         touches = JSON.stringify(
           this.checkedRows.map((x) => {
             return {
@@ -1631,9 +1706,11 @@ export default {
               res.data.data.whiches.forEach((x) => {
                 if (this.tab === 2 + this.tableData.subscriptions.length) {
                   const row = this.dockerProxies.find((p) => {
-                    return p.which.id === x.id &&
-                           p.which._type === x._type &&
-                           (x.sub === null || p.which.sub === x.sub);
+                    return (
+                      p.which.id === x.id &&
+                      p.which._type === x._type &&
+                      (x.sub === null || p.which.sub === x.sub)
+                    );
                   });
                   if (row) {
                     this.$set(row, "pingLatency", x.pingLatency);
@@ -1807,111 +1884,275 @@ export default {
         });
       });
     },
+    collectDockerProxyOptions() {
+      const list = [];
+      if (this.tableData && this.tableData.servers) {
+        this.tableData.servers.forEach((s) => {
+          list.push({
+            _type: "server",
+            id: s.id,
+            name: s.name || s.address,
+            address: s.address,
+            net: s.net,
+          });
+        });
+      }
+      if (this.tableData && this.tableData.subscriptions) {
+        this.tableData.subscriptions.forEach((sub, subIdx) => {
+          if (sub.servers) {
+            sub.servers.forEach((s) => {
+              list.push({
+                _type: "subscriptionServer",
+                id: s.id,
+                sub: subIdx,
+                name: s.name || s.address,
+                address: s.address,
+                net: s.net,
+              });
+            });
+          }
+        });
+      }
+      return list;
+    },
+    isSameDockerProxyWhich(a, b) {
+      if (!a || !b) {
+        return false;
+      }
+      return (
+        a.id === b.id &&
+        a._type === b._type &&
+        (a._type !== "subscriptionServer" || a.sub === b.sub)
+      );
+    },
+    findDockerProxyOption(which) {
+      const options = this.collectDockerProxyOptions();
+      return options.find((s) => this.isSameDockerProxyWhich(s, which)) || null;
+    },
+    normalizeDockerProxyWhich(which) {
+      if (!which) {
+        return null;
+      }
+      const data = {
+        _type: which._type,
+        id: which.id,
+      };
+      if (which.sub !== undefined) {
+        data.sub = which.sub;
+      }
+      return data;
+    },
+    formatDockerProxyOption(s) {
+      if (!s) {
+        return "";
+      }
+      const prefix = s.net ? `[${String(s.net).toUpperCase()}] ` : "";
+      const name = s.name || s.address || s.id;
+      return `${prefix}${name}${s.address ? ` (${s.address})` : ""}`;
+    },
+    openDockerProxyModal({ editing, port, which, frontWhich }) {
+      const target = this.findDockerProxyOption(which) || which;
+      const front = frontWhich
+        ? this.findDockerProxyOption(frontWhich) || frontWhich
+        : null;
+      this.dockerProxyEditing = editing;
+      this.dockerProxyTargetWhich = target;
+      this.dockerProxyPort = port;
+      this.dockerProxyFrontWhich =
+        front && !this.isSameDockerProxyWhich(front, target) ? front : null;
+      this.showModalDockerProxy = true;
+    },
     fetchDockerProxies() {
       this.$axios({
         url: apiRoot + "/dockerProxies",
-      }).then((res) => {
-        this.dockerProxies = res.data.data || [];
-      }).catch((err) => {
-        console.error("fetchDockerProxies failed:", err);
-      });
+      })
+        .then((res) => {
+          this.dockerProxies = res.data.data || [];
+        })
+        .catch((err) => {
+          console.error("fetchDockerProxies failed:", err);
+        });
     },
     handleClickDockerProxy(row, subIndex = null) {
       let which = {
-        _type: row._type || (subIndex !== null ? "subscriptionServer" : "server"),
+        _type:
+          row._type || (subIndex !== null ? "subscriptionServer" : "server"),
         id: row.id,
       };
       if (subIndex !== null) {
         which.sub = subIndex;
       }
-      this.dockerProxyTargetWhich = which;
-      this.dockerProxyTargetName = row.name || row.server || "";
-      this.dockerProxyPort = null;
-      this.dockerProxyFrontWhich = null;
-      this.showModalDockerProxy = true;
+      this.openDockerProxyModal({
+        editing: false,
+        port: null,
+        which,
+        frontWhich: null,
+      });
     },
     submitDockerProxy() {
       const port = parseInt(this.dockerProxyPort);
       if (isNaN(port) || port <= 0 || port > 65535) {
         this.$buefy.toast.open({
-          message: this.$t('common.fail') + ': invalid port number',
-          type: 'is-danger'
+          message: this.$t("common.fail") + ": invalid port number",
+          type: "is-danger",
+        });
+        return;
+      }
+      if (!this.dockerProxyTargetWhich) {
+        this.$buefy.toast.open({
+          message: this.$t("common.fail") + ": please select a proxy node",
+          type: "is-danger",
         });
         return;
       }
       this.dockerProxySubmitting = true;
       this.$buefy.toast.open({
-        message: this.$t('common.checkRunning'),
-        type: 'is-info'
+        message: this.$t("common.checkRunning"),
+        type: "is-info",
       });
       const data = {
-        which: this.dockerProxyTargetWhich,
-        port: port
+        which: this.normalizeDockerProxyWhich(this.dockerProxyTargetWhich),
+        port: port,
       };
       if (this.dockerProxyFrontWhich) {
-        data.frontWhich = {
-          _type: this.dockerProxyFrontWhich._type,
-          id: this.dockerProxyFrontWhich.id
-        };
-        if (this.dockerProxyFrontWhich.sub !== undefined) {
-          data.frontWhich.sub = this.dockerProxyFrontWhich.sub;
-        }
+        data.frontWhich = this.normalizeDockerProxyWhich(
+          this.dockerProxyFrontWhich
+        );
       }
       this.$axios({
-        method: 'POST',
-        url: apiRoot + '/dockerProxy',
-        data: data
-      }).then((res) => {
-        this.dockerProxySubmitting = false;
-        this.showModalDockerProxy = false;
-        this.$buefy.toast.open({
-          message: this.$t('dockerProxies.createSuccess'),
-          type: 'is-success'
+        method: this.dockerProxyEditing ? "PUT" : "POST",
+        url: apiRoot + "/dockerProxy",
+        data: data,
+      })
+        .then(() => {
+          this.dockerProxySubmitting = false;
+          this.showModalDockerProxy = false;
+          this.$buefy.toast.open({
+            message: this.$t(
+              this.dockerProxyEditing
+                ? "dockerProxies.updateSuccess"
+                : "dockerProxies.createSuccess"
+            ),
+            type: "is-success",
+          });
+          this.fetchDockerProxies();
+        })
+        .catch((err) => {
+          this.dockerProxySubmitting = false;
+          this.$buefy.toast.open({
+            message:
+              this.$t("common.fail") +
+              ": " +
+              (err.response?.data?.message || err.message),
+            type: "is-danger",
+            duration: 5000,
+          });
         });
-        this.fetchDockerProxies();
-      }).catch((err) => {
-        this.dockerProxySubmitting = false;
-        this.$buefy.toast.open({
-          message: this.$t('common.fail') + ': ' + (err.response?.data?.message || err.message),
-          type: 'is-danger',
-          duration: 5000
-        });
+    },
+    handleEditDockerProxy(row) {
+      this.openDockerProxyModal({
+        editing: true,
+        port: row.port,
+        which: row.which,
+        frontWhich: row.frontWhich || null,
       });
+    },
+    handlePauseDockerProxy(row) {
+      this.$buefy.toast.open({
+        message: this.$t("common.checkRunning"),
+        type: "is-info",
+      });
+      this.$axios({
+        method: "PUT",
+        url: apiRoot + "/dockerProxy/pause",
+        data: {
+          port: row.port,
+        },
+      })
+        .then(() => {
+          this.$buefy.toast.open({
+            message: this.$t("dockerProxies.pauseSuccess"),
+            type: "is-success",
+          });
+          this.fetchDockerProxies();
+        })
+        .catch((err) => {
+          this.$buefy.toast.open({
+            message:
+              this.$t("common.fail") +
+              ": " +
+              (err.response?.data?.message || err.message),
+            type: "is-danger",
+          });
+        });
+    },
+    handleResumeDockerProxy(row) {
+      this.$buefy.toast.open({
+        message: this.$t("common.checkRunning"),
+        type: "is-info",
+      });
+      this.$axios({
+        method: "PUT",
+        url: apiRoot + "/dockerProxy/resume",
+        data: {
+          port: row.port,
+        },
+      })
+        .then(() => {
+          this.$buefy.toast.open({
+            message: this.$t("dockerProxies.resumeSuccess"),
+            type: "is-success",
+          });
+          this.fetchDockerProxies();
+        })
+        .catch((err) => {
+          this.$buefy.toast.open({
+            message:
+              this.$t("common.fail") +
+              ": " +
+              (err.response?.data?.message || err.message),
+            type: "is-danger",
+          });
+        });
     },
     handleDeleteDockerProxy(row) {
       this.$buefy.dialog.confirm({
-        title: this.$t('dockerProxies.btnRelease'),
-        message: `${this.$t('dockerProxies.btnRelease')} port ${row.port}?`,
-        confirmText: this.$t('dockerProxies.btnRelease'),
-        type: 'is-danger',
+        title: this.$t("dockerProxies.btnRelease"),
+        message: `${this.$t("dockerProxies.btnRelease")} port ${row.port}?`,
+        confirmText: this.$t("dockerProxies.btnRelease"),
+        type: "is-danger",
         hasIcon: true,
         onConfirm: () => {
           this.$buefy.toast.open({
-            message: this.$t('common.checkRunning'),
-            type: 'is-info'
+            message: this.$t("common.checkRunning"),
+            type: "is-info",
           });
           this.$axios({
-            method: 'DELETE',
-            url: apiRoot + '/dockerProxy',
+            method: "DELETE",
+            url: apiRoot + "/dockerProxy",
             data: {
-              port: row.port
-            }
-          }).then((res) => {
-            this.$buefy.toast.open({
-              message: this.$t('dockerProxies.deleteSuccess'),
-              type: 'is-success'
+              port: row.port,
+            },
+          })
+            .then(() => {
+              this.$buefy.toast.open({
+                message: this.$t("dockerProxies.deleteSuccess"),
+                type: "is-success",
+              });
+              this.fetchDockerProxies();
+            })
+            .catch((err) => {
+              this.$buefy.toast.open({
+                message:
+                  this.$t("common.fail") +
+                  ": " +
+                  (err.response?.data?.message || err.message),
+                type: "is-danger",
+              });
             });
-            this.fetchDockerProxies();
-          }).catch((err) => {
-            this.$buefy.toast.open({
-              message: this.$t('common.fail') + ': ' + (err.response?.data?.message || err.message),
-              type: 'is-danger'
-            });
-          });
-        }
+        },
       });
     },
-
   },
 };
 </script>

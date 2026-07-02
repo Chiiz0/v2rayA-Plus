@@ -38,6 +38,30 @@ docker compose up -d --build
 # Navigate to: http://localhost:2017
 ```
 
+### Ubuntu 24 / 26 Server Install (Docker + Host Transparent Proxy)
+
+If the host itself needs v2rayA-Plus transparent proxy while this project still creates Docker SOCKS proxy nodes, use the dedicated installer:
+
+```bash
+sudo bash scripts/install-ubuntu-transparent.sh
+```
+
+The script installs Docker / nftables dependencies on Ubuntu 24.x / 26.x, builds the current project image, and deploys it under `/opt/v2raya-plus`. The main service uses `network_mode: host`, so the Web UI still listens on `2017` and transparent proxy rules are written into the host network namespace.
+
+After installation, import and connect a node in the Web UI, then enable transparent proxy there.
+
+To prevent Docker proxy node traffic created by this project from being captured again by the host transparent proxy, the installer creates a dedicated Docker network named `v2raya-plus-proxy`, and generated SOCKS proxy containers join that network. After transparent proxy starts, the hook dynamically reads the dedicated network's actual subnet and ensures a source bypass rule is inserted before the redirect rule in `inet v2raya` / `tp_rule`, for example:
+
+```nft
+ip saddr <v2raya-plus-proxy subnet> return
+```
+
+No subnet is hardcoded by default; Docker assigns one automatically. If you want a custom network name or fixed subnet, pass them during install:
+
+```bash
+sudo PROXY_NETWORK="<network-name>" PROXY_NETWORK_SUBNET="<cidr>" bash scripts/install-ubuntu-transparent.sh
+```
+
 ### Stop
 
 ```bash
@@ -84,7 +108,7 @@ The signature feature of v2rayA-Plus. It allows you to run multiple V2Ray nodes 
    - Writes the config to a Docker volume using an `alpine` helper container.
    - Starts a `v2fly/v2fly-core` container bound to `<host>:<port>`.
 4. The SOCKS5 proxy is now available at `localhost:1085` on the host.
-5. Manage all active proxy containers from the **Docker Proxies** tab in the UI.
+5. Manage all active proxy containers from the **Docker Proxies** tab in the UI; existing proxies can be edited, paused, resumed, or released.
 
 > **Tip**: You can run 10+ nodes simultaneously on different ports with no conflicts.
 
@@ -97,6 +121,7 @@ The signature feature of v2rayA-Plus. It allows you to run multiple V2Ray nodes 
 | `V2RAYA_CONFIG` | `/etc/v2raya-plus` | Path where v2rayA-Plus stores its configuration and database |
 | `V2RAYA_ADDRESS` | `0.0.0.0:2017` | Address and port the web service listens on |
 | `V2RAYA_LOG_LEVEL` | `info` | Log verbosity: `trace`, `debug`, `info`, `warn`, `error` |
+| `V2RAYA_DOCKER_PROXY_NETWORK` | `v2raya-plus-proxy` | Dedicated Docker network used by generated proxy node containers |
 
 ---
 

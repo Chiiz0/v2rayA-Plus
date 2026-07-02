@@ -202,6 +202,9 @@ func Run() error {
 		auth.PUT("tproxyWhiteIpGroups", controller.PutTproxyWhiteIpGroups)
 		auth.GET("dockerProxies", controller.GetDockerProxies)
 		auth.POST("dockerProxy", controller.PostDockerProxy)
+		auth.PUT("dockerProxy", controller.PutDockerProxy)
+		auth.PUT("dockerProxy/pause", controller.PauseDockerProxy)
+		auth.PUT("dockerProxy/resume", controller.ResumeDockerProxy)
 		auth.DELETE("dockerProxy", controller.DeleteDockerProxy)
 	}
 

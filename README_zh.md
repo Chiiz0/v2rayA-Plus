@@ -38,6 +38,30 @@ docker compose up -d --build
 # 浏览器访问: http://localhost:2017
 ```
 
+### Ubuntu 24 / 26 服务器一键安装（Docker + 宿主机透明代理）
+
+如果宿主机本身也需要使用 v2rayA-Plus 的透明代理，同时仍然需要通过项目创建 Docker SOCKS 节点，使用专用安装脚本：
+
+```bash
+sudo bash scripts/install-ubuntu-transparent.sh
+```
+
+脚本会在 Ubuntu 24.x / 26.x 上安装 Docker / nftables 依赖，构建当前项目镜像，并部署到 `/opt/v2raya-plus`。主服务使用 `network_mode: host`，因此 Web UI 仍监听 `2017`，透明代理规则会写入宿主机网络命名空间。
+
+安装完成后，仍需要在 Web UI 中导入并连接节点，然后开启透明代理。
+
+为避免本项目创建的 Docker 节点流量被宿主机透明代理二次劫持，脚本会创建专用 Docker 网络 `v2raya-plus-proxy`，并让后续创建的 SOCKS 节点容器加入该网络。透明代理启动后，hook 会动态读取这个专用网络的实际 subnet，并在 `inet v2raya` / `tp_rule` 中于 redirect 规则前确保插入源地址直连规则，例如：
+
+```nft
+ip saddr <v2raya-plus-proxy subnet> return
+```
+
+默认不写死网段，由 Docker 自动分配。如需指定网络名或固定 subnet，可在安装时追加：
+
+```bash
+sudo PROXY_NETWORK="<network-name>" PROXY_NETWORK_SUBNET="<cidr>" bash scripts/install-ubuntu-transparent.sh
+```
+
 ### 停止服务
 
 ```bash
@@ -84,7 +108,7 @@ volumes:
    - 使用 `alpine` 辅助容器将配置写入 Docker Volume。
    - 启动一个绑定到指定端口的 `v2fly/v2fly-core` 容器。
 4. SOCKS5 代理立即可用：`localhost:1085`。
-5. 在 **Docker 代理**标签页中统一管理所有代理容器。
+5. 在 **Docker 代理**标签页中统一管理所有代理容器；已创建的代理可以修改、暂停、恢复或释放。
 
 > **提示**：可以同时运行 10 个以上节点，各自使用不同端口，互不干扰。
 
@@ -97,6 +121,7 @@ volumes:
 | `V2RAYA_CONFIG` | `/etc/v2raya-plus` | v2rayA-Plus 配置和数据库的存储路径 |
 | `V2RAYA_ADDRESS` | `0.0.0.0:2017` | Web 服务监听地址和端口 |
 | `V2RAYA_LOG_LEVEL` | `info` | 日志级别：`trace`、`debug`、`info`、`warn`、`error` |
+| `V2RAYA_DOCKER_PROXY_NETWORK` | `v2raya-plus-proxy` | Docker 代理节点容器使用的专用网络 |
 
 ---
 

@@ -23,6 +23,7 @@ type Params struct {
 	TransparentHook      string `id:"transparent-hook" desc:"the executable file to run in the transparent proxy life-cycle. v2rayA will pass in the --transparent-type (tproxy, redirect) and --stage (pre-start, post-start, pre-stop, post-stop) arguments."`
 	CoreHook             string `id:"core-hook" desc:"the executable file to run in the v2ray-core life-cycle. v2rayA will pass in the --stage (pre-start, post-start, pre-stop, post-stop) argument."`
 	PluginManager        string `id:"plugin-manager" desc:"the executable file to run in the v2ray-core life-cycle. v2rayA will pass in the --stage (pre-start, post-start, pre-stop, post-stop) argument."`
+	DockerProxyNetwork   string `id:"docker-proxy-network" default:"v2raya-plus-proxy" desc:"Docker network used by generated SOCKS5 proxy containers."`
 	WebDir               string `id:"webdir" desc:"v2rayA web files directory. use embedded files if not specify."`
 	IPV6Support          string `id:"ipv6-support" default:"auto" desc:"Optional values: auto, on, off. Make sure your IPv6 network works fine before you turn it on."`
 	NftablesSupport      string `id:"nftables-support" default:"auto" desc:"Optional values: auto, on, off. Experimental feature. Make sure you have installed nftables."`

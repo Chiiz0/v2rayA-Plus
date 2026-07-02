@@ -32,7 +32,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-X github.com/v2rayA/v2rayA/conf.Version=$(
 FROM v2fly/v2fly-core
 COPY --from=builder /build/service/v2raya-plus /usr/bin/
 RUN wget -O /usr/local/share/v2ray/LoyalsoldierSite.dat https://raw.githubusercontent.com/mzz2017/dist-v2ray-rules-dat/master/geosite.dat
-RUN apk add --no-cache iptables ip6tables tzdata docker-cli
+RUN apk add --no-cache iptables ip6tables nftables iproute2 tzdata docker-cli
 LABEL org.opencontainers.image.source=https://github.com/v2rayA/v2rayA
 EXPOSE 2017
 ENV V2RAYA_CONFIG /etc/v2raya-plus
