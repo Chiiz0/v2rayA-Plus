@@ -24,15 +24,16 @@
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows / macOS) or Docker Engine (Linux)
 - `docker compose` (bundled with Docker Desktop)
 
-### Build & Run
+### Run with the Published Image
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/Chiiz0/v2raya-plus.git
 cd v2raya-plus
 
-# 2. Build and start
-docker compose up -d --build
+# 2. Pull the latest published image and start
+docker compose pull
+docker compose up -d
 
 # 3. Open the web UI
 # Navigate to: http://localhost:2017
@@ -46,7 +47,13 @@ If the host itself needs v2rayA-Plus transparent proxy while this project still 
 sudo bash scripts/install-ubuntu-transparent.sh
 ```
 
-The script installs Docker / nftables dependencies on Ubuntu 24.x / 26.x, builds the current project image, and deploys it under `/opt/v2raya-plus`. The main service uses `network_mode: host`, so the Web UI still listens on `2017` and transparent proxy rules are written into the host network namespace.
+By default, the script installs Docker / nftables dependencies on Ubuntu 24.x / 26.x, builds the current project image, and deploys it under `/opt/v2raya-plus`. The main service uses `network_mode: host`, so the Web UI still listens on `2017` and transparent proxy rules are written into the host network namespace.
+
+To install with the published GHCR image instead of building locally, run:
+
+```bash
+sudo BUILD_IMAGE=0 IMAGE=ghcr.io/chiiz0/v2raya-plus:latest bash scripts/install-ubuntu-transparent.sh
+```
 
 After installation, import and connect a node in the Web UI, then enable transparent proxy there.
 
@@ -72,13 +79,12 @@ docker compose down
 
 ## 🐳 Docker Compose Configuration
 
-The [`docker-compose.yml`](./docker-compose.yml) launches the main service:
+The [`docker-compose.yml`](./docker-compose.yml) launches the main service with the published GHCR image:
 
 ```yaml
 services:
   v2raya-plus:
-    image: v2raya-plus:local
-    build: .
+    image: ghcr.io/chiiz0/v2raya-plus:latest
     privileged: true
     ports:
       - "2017:2017"
@@ -130,13 +136,13 @@ The signature feature of v2rayA-Plus. It allows you to run multiple V2Ray nodes 
 ### Build the Docker image
 
 ```bash
-docker compose build v2raya-plus
+docker compose -f docker-compose.dev.yml build v2raya-plus
 ```
 
 ### Rebuild from scratch (no cache)
 
 ```bash
-docker compose build --no-cache v2raya-plus
+docker compose -f docker-compose.dev.yml build --no-cache v2raya-plus
 ```
 
 ### Project Structure
@@ -144,7 +150,8 @@ docker compose build --no-cache v2raya-plus
 ```
 v2rayA-Plus/
 ├── Dockerfile              # Multi-stage build: node → golang → v2fly-core runner
-├── docker-compose.yml      # Local development orchestration
+├── docker-compose.yml      # Published GHCR image orchestration
+├── docker-compose.dev.yml  # Local development build orchestration
 ├── gui/                    # Vue.js 2 frontend
 │   └── src/
 │       ├── locales/        # i18n: en.js, zh.js (+ fa-ir, pt-br, ru)

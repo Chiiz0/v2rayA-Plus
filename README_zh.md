@@ -24,15 +24,16 @@
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)（Windows / macOS）或 Docker Engine（Linux）
 - `docker compose`（Docker Desktop 已内置）
 
-### 构建并启动
+### 使用已发布镜像启动
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/v2raya-plus.git
+git clone https://github.com/Chiiz0/v2raya-plus.git
 cd v2raya-plus
 
-# 2. 构建并启动服务
-docker compose up -d --build
+# 2. 拉取最新发布镜像并启动服务
+docker compose pull
+docker compose up -d
 
 # 3. 打开 Web 管理界面
 # 浏览器访问: http://localhost:2017
@@ -46,7 +47,13 @@ docker compose up -d --build
 sudo bash scripts/install-ubuntu-transparent.sh
 ```
 
-脚本会在 Ubuntu 24.x / 26.x 上安装 Docker / nftables 依赖，构建当前项目镜像，并部署到 `/opt/v2raya-plus`。主服务使用 `network_mode: host`，因此 Web UI 仍监听 `2017`，透明代理规则会写入宿主机网络命名空间。
+脚本默认会在 Ubuntu 24.x / 26.x 上安装 Docker / nftables 依赖，构建当前项目镜像，并部署到 `/opt/v2raya-plus`。主服务使用 `network_mode: host`，因此 Web UI 仍监听 `2017`，透明代理规则会写入宿主机网络命名空间。
+
+如果想直接使用已发布的 GHCR 镜像，不在服务器本地构建，可以这样运行：
+
+```bash
+sudo BUILD_IMAGE=0 IMAGE=ghcr.io/chiiz0/v2raya-plus:latest bash scripts/install-ubuntu-transparent.sh
+```
 
 安装完成后，仍需要在 Web UI 中导入并连接节点，然后开启透明代理。
 
@@ -72,13 +79,12 @@ docker compose down
 
 ## 🐳 Docker Compose 配置说明
 
-[`docker-compose.yml`](./docker-compose.yml) 启动主服务：
+[`docker-compose.yml`](./docker-compose.yml) 使用已发布的 GHCR 镜像启动主服务：
 
 ```yaml
 services:
   v2raya-plus:
-    image: v2raya-plus:local
-    build: .
+    image: ghcr.io/chiiz0/v2raya-plus:latest
     privileged: true
     ports:
       - "2017:2017"
@@ -130,13 +136,13 @@ volumes:
 ### 构建 Docker 镜像
 
 ```bash
-docker compose build v2raya-plus
+docker compose -f docker-compose.dev.yml build v2raya-plus
 ```
 
 ### 强制全量重建（不使用缓存）
 
 ```bash
-docker compose build --no-cache v2raya-plus
+docker compose -f docker-compose.dev.yml build --no-cache v2raya-plus
 ```
 
 ### 项目结构
@@ -144,7 +150,8 @@ docker compose build --no-cache v2raya-plus
 ```
 v2rayA-Plus/
 ├── Dockerfile              # 多阶段构建：node → golang → v2fly-core runner
-├── docker-compose.yml      # 本地开发与测试编排配置
+├── docker-compose.yml      # 使用已发布 GHCR 镜像的编排配置
+├── docker-compose.dev.yml  # 本地开发与构建编排配置
 ├── gui/                    # Vue.js 2 前端
 │   └── src/
 │       ├── locales/        # i18n：en.js, zh.js（+ fa-ir, pt-br, ru）
