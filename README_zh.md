@@ -39,12 +39,24 @@ docker compose up -d
 # 浏览器访问: http://localhost:2017
 ```
 
+镜像同时内置 V2Fly 与 Xray。默认使用 V2Fly；需要让主连接和透明代理使用 Xray（例如 VLESS Vision / REALITY 节点）时：
+
+```bash
+V2RAYA_CORE=xray docker compose up -d
+```
+
 ### Ubuntu 24 / 26 服务器一键安装（Docker + 宿主机透明代理）
 
 如果宿主机本身也需要使用 v2rayA-Plus 的透明代理，同时仍然需要通过项目创建 Docker SOCKS 节点，使用专用安装脚本：
 
 ```bash
 sudo bash scripts/install-ubuntu-transparent.sh
+```
+
+需要主服务使用 Xray 时：
+
+```bash
+sudo CORE="xray" bash scripts/install-ubuntu-transparent.sh
 ```
 
 脚本默认会在 Ubuntu 24.x / 26.x 上安装 Docker / nftables 依赖，构建当前项目镜像，并部署到 `/opt/v2raya-plus`。主服务使用 `network_mode: host`，因此 Web UI 仍监听 `2017`，透明代理规则会写入宿主机网络命名空间。
@@ -112,7 +124,7 @@ volumes:
 3. 后端自动执行：
    - 为该节点生成 V2Ray 配置文件。
    - 使用 `alpine` 辅助容器将配置写入 Docker Volume。
-   - 启动一个绑定到指定端口的 `v2fly/v2fly-core` 容器。
+   - 按弹窗中选择的内核启动 V2Fly 或 Xray 容器，并绑定到指定端口。
 4. SOCKS5 代理立即可用：`localhost:1085`。
 5. 在 **Docker 代理**标签页中统一管理所有代理容器；已创建的代理可以修改、暂停、恢复或释放。
 
@@ -125,6 +137,7 @@ volumes:
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `V2RAYA_CONFIG` | `/etc/v2raya-plus` | v2rayA-Plus 配置和数据库的存储路径 |
+| `V2RAYA_CORE` | `v2fly` | 主服务内核：`auto`、`v2fly` 或 `xray`；Vision / REALITY 节点应使用 `xray` |
 | `V2RAYA_ADDRESS` | `0.0.0.0:2017` | Web 服务监听地址和端口 |
 | `V2RAYA_LOG_LEVEL` | `info` | 日志级别：`trace`、`debug`、`info`、`warn`、`error` |
 | `V2RAYA_DOCKER_PROXY_NETWORK` | `v2raya-plus-proxy` | Docker 代理节点容器使用的专用网络 |
@@ -172,8 +185,8 @@ v2rayA-Plus/
 ### IP 转发保护
 IP 转发（`/proc/sys/net/ipv4/ip_forward`）仅在设置中**显式开启**时才写入 `1`。关闭时，宿主机的系统值**绝不会被修改**，保护 Docker 自身网络不受干扰。
 
-### Docker 代理镜像版本动态匹配
-创建代理容器时，镜像 Tag 从当前运行的 v2ray-core 版本动态解析（如 `v2fly/v2fly-core:v5.41.0`），确保代理容器内核版本与主容器一致。版本无法获取时降级为 `latest`。
+### 内核选择与 Docker 代理镜像
+主镜像同时包含 V2Fly 和 Xray，通过 `V2RAYA_CORE` 选择主服务内核。每个 Docker 代理还可独立选择“自动 / V2Fly / Xray”：“自动”跟随主服务内核；V2Fly 使用当前运行版本对应的镜像 Tag（如 `v2fly/v2fly-core:v5.41.0`），版本无法获取时降级为 `latest`；Xray 使用 `teddysun/xray:latest`。
 
 ### 配置写入方案
 由于 `v2fly-core` 使用 Distroless 镜像（无 Shell 环境），通过 `alpine` 轻量辅助容器将节点配置写入各自的独立 Docker Volume（`v2raya-socks-<port>`），然后再挂载给代理容器运行。
@@ -192,4 +205,5 @@ IP 转发（`/proc/sys/net/ipv4/ip_forward`）仅在设置中**显式开启**时
 
 - [v2rayA](https://github.com/v2rayA/v2rayA) — 原始项目，由 mzz2017 及贡献者开发
 - [v2fly/v2fly-core](https://github.com/v2fly/v2ray-core) — V2Ray 核心引擎
+- [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — Xray 核心引擎
 - [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) — GeoSite/GeoIP 规则数据

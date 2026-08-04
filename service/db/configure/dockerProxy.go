@@ -9,14 +9,23 @@ import (
 	"github.com/v2rayA/v2rayA/db"
 )
 
+type DockerProxyCore string
+
+const (
+	DockerProxyCoreAuto  DockerProxyCore = "auto"
+	DockerProxyCoreV2Fly DockerProxyCore = "v2fly"
+	DockerProxyCoreXray  DockerProxyCore = "xray"
+)
+
 type DockerProxy struct {
-	Port            int    `json:"port"`
-	Which           Which  `json:"which"`
-	FrontWhich      *Which `json:"frontWhich,omitempty"`
-	ServerName      string `json:"serverName"`
-	FrontServerName string `json:"frontServerName,omitempty"`
-	ContainerName   string `json:"containerName"`
-	Status          string `json:"status"`
+	Port            int             `json:"port"`
+	Which           Which           `json:"which"`
+	FrontWhich      *Which          `json:"frontWhich,omitempty"`
+	Core            DockerProxyCore `json:"core"`
+	ServerName      string          `json:"serverName"`
+	FrontServerName string          `json:"frontServerName,omitempty"`
+	ContainerName   string          `json:"containerName"`
+	Status          string          `json:"status"`
 }
 
 func GetDockerProxies() ([]DockerProxy, error) {

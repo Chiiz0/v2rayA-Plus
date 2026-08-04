@@ -51,8 +51,19 @@ type dockerProxyRuntime struct {
 	ConfigBytes     []byte
 	ImageName       string
 	MountPath       string
+	Core            configure.DockerProxyCore
+	RequestedCore   configure.DockerProxyCore
 	ServerName      string
 	FrontServerName string
+}
+
+type dockerProxyCoreRuntime struct {
+	RequestedCore configure.DockerProxyCore
+	Core          configure.DockerProxyCore
+	Variant       where.Variant
+	CoreVersion   string
+	ImageName     string
+	MountPath     string
 }
 
 func runDockerCmd(args ...string) (string, error) {
@@ -102,6 +113,52 @@ func validateDockerProxy(port int, which configure.Which, frontWhich *configure.
 	return nil
 }
 
+func selectDockerProxyCore(core configure.DockerProxyCore, detectedVariant where.Variant, detectedVersion string) (dockerProxyCoreRuntime, error) {
+	core = configure.DockerProxyCore(strings.ToLower(strings.TrimSpace(string(core))))
+	if core == "" {
+		core = configure.DockerProxyCoreAuto
+	}
+	if core != configure.DockerProxyCoreAuto && core != configure.DockerProxyCoreV2Fly && core != configure.DockerProxyCoreXray {
+		return dockerProxyCoreRuntime{}, fmt.Errorf("invalid docker proxy core %q: expected auto, v2fly, or xray", core)
+	}
+
+	actualCore := core
+	if actualCore == configure.DockerProxyCoreAuto {
+		if detectedVariant == where.Xray {
+			actualCore = configure.DockerProxyCoreXray
+		} else {
+			actualCore = configure.DockerProxyCoreV2Fly
+		}
+	}
+
+	runtime := dockerProxyCoreRuntime{
+		RequestedCore: core,
+		Core:          actualCore,
+	}
+	if actualCore == configure.DockerProxyCoreXray {
+		runtime.Variant = where.Xray
+		runtime.ImageName = "teddysun/xray:latest"
+		runtime.MountPath = "/etc/xray"
+		if detectedVariant == where.Xray {
+			runtime.CoreVersion = detectedVersion
+		}
+		return runtime, nil
+	}
+
+	runtime.Variant = where.V2ray
+	runtime.ImageName = "v2fly/v2fly-core:latest"
+	runtime.MountPath = "/etc/v2ray"
+	if detectedVariant == where.V2ray && detectedVersion != "" {
+		runtime.CoreVersion = detectedVersion
+		versionTag := detectedVersion
+		if !strings.HasPrefix(versionTag, "v") {
+			versionTag = "v" + versionTag
+		}
+		runtime.ImageName = "v2fly/v2fly-core:" + versionTag
+	}
+	return runtime, nil
+}
+
 func getDockerProxyNetwork() string {
 	network := strings.TrimSpace(conf.GetEnvironmentConfig().DockerProxyNetwork)
 	if network == "" || strings.EqualFold(network, "none") {
@@ -123,16 +180,20 @@ func ensureDockerProxyNetwork(network string) error {
 	return nil
 }
 
-func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which) (*dockerProxyRuntime, error) {
+func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which, core configure.DockerProxyCore) (*dockerProxyRuntime, error) {
 	sr, err := which.LocateServerRaw()
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate server: %w", err)
 	}
 
-	variant, coreVersion, _ := where.GetV2rayServiceVersion()
+	detectedVariant, detectedVersion, _ := where.GetV2rayServiceVersion()
+	coreRuntime, err := selectDockerProxyCore(core, detectedVariant, detectedVersion)
+	if err != nil {
+		return nil, err
+	}
 	c, err := sr.ServerObj.Configuration(serverObj.PriorInfo{
-		Variant:     variant,
-		CoreVersion: coreVersion,
+		Variant:     coreRuntime.Variant,
+		CoreVersion: coreRuntime.CoreVersion,
 		Tag:         "proxy",
 	})
 	if err != nil {
@@ -150,8 +211,8 @@ func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which)
 		frontServerName = frontSr.ServerObj.GetName()
 
 		frontC, err := frontSr.ServerObj.Configuration(serverObj.PriorInfo{
-			Variant:     variant,
-			CoreVersion: coreVersion,
+			Variant:     coreRuntime.Variant,
+			CoreVersion: coreRuntime.CoreVersion,
 			Tag:         "pre-proxy",
 		})
 		if err != nil {
@@ -220,24 +281,12 @@ func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which)
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	imageName := "v2fly/v2fly-core:latest"
-	if coreVersion != "" {
-		versionTag := coreVersion
-		if !strings.HasPrefix(versionTag, "v") {
-			versionTag = "v" + versionTag
-		}
-		imageName = "v2fly/v2fly-core:" + versionTag
-	}
-	mountPath := "/etc/v2ray"
-	if variant == where.Xray {
-		imageName = "teddysun/xray:latest"
-		mountPath = "/etc/xray"
-	}
-
 	return &dockerProxyRuntime{
 		ConfigBytes:     configBytes,
-		ImageName:       imageName,
-		MountPath:       mountPath,
+		ImageName:       coreRuntime.ImageName,
+		MountPath:       coreRuntime.MountPath,
+		Core:            coreRuntime.Core,
+		RequestedCore:   coreRuntime.RequestedCore,
 		ServerName:      sr.ServerObj.GetName(),
 		FrontServerName: frontServerName,
 	}, nil
@@ -278,7 +327,7 @@ func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolu
 		runArgs = append(runArgs, "--network", proxyNetwork)
 	}
 	runArgs = append(runArgs, runtime.ImageName)
-	if strings.HasPrefix(runtime.ImageName, "v2fly/v2fly-core:") {
+	if runtime.Core == configure.DockerProxyCoreV2Fly {
 		runArgs = append(runArgs, "run", "-c", "/etc/v2ray/config.json")
 	}
 	_, err = runDockerCmd(runArgs...)
@@ -294,7 +343,7 @@ func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolu
 	return nil
 }
 
-func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port int) error {
+func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port int, core configure.DockerProxyCore) error {
 	if err := validateDockerProxy(port, which, frontWhich); err != nil {
 		return err
 	}
@@ -311,7 +360,7 @@ func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port 
 		return fmt.Errorf("port %d is already occupied on the host", port)
 	}
 
-	runtime, err := buildDockerProxyRuntime(which, frontWhich)
+	runtime, err := buildDockerProxyRuntime(which, frontWhich, core)
 	if err != nil {
 		return err
 	}
@@ -324,6 +373,7 @@ func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port 
 		Port:            port,
 		Which:           which,
 		FrontWhich:      frontWhich,
+		Core:            runtime.RequestedCore,
 		ServerName:      runtime.ServerName,
 		FrontServerName: runtime.FrontServerName,
 		ContainerName:   fmt.Sprintf("v2raya-socks-%d", port),
@@ -337,7 +387,7 @@ func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port 
 	return nil
 }
 
-func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Which) error {
+func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Which, core configure.DockerProxyCore) error {
 	if err := validateDockerProxy(port, which, frontWhich); err != nil {
 		return err
 	}
@@ -349,6 +399,9 @@ func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Wh
 	if !ok {
 		return fmt.Errorf("docker proxy on port %d does not exist", port)
 	}
+	if strings.TrimSpace(string(core)) == "" {
+		core = proxy.Core
+	}
 
 	containerName := fmt.Sprintf("v2raya-socks-%d", port)
 	out, inspectErr := runDockerCmd("inspect", "--format", "{{.State.Paused}}", containerName)
@@ -357,7 +410,7 @@ func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Wh
 		wasPaused = true
 	}
 
-	runtime, err := buildDockerProxyRuntime(which, frontWhich)
+	runtime, err := buildDockerProxyRuntime(which, frontWhich, core)
 	if err != nil {
 		return err
 	}
@@ -367,6 +420,7 @@ func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Wh
 
 	proxy.Which = which
 	proxy.FrontWhich = frontWhich
+	proxy.Core = runtime.RequestedCore
 	proxy.ServerName = runtime.ServerName
 	proxy.FrontServerName = runtime.FrontServerName
 	proxy.ContainerName = containerName
@@ -407,7 +461,7 @@ func ResumeDockerProxy(port int) error {
 	containerName := fmt.Sprintf("v2raya-socks-%d", port)
 	out, inspectErr := runDockerCmd("inspect", "--format", "{{.State.Running}}\t{{.State.Paused}}", containerName)
 	if inspectErr != nil {
-		runtime, err := buildDockerProxyRuntime(proxy.Which, proxy.FrontWhich)
+		runtime, err := buildDockerProxyRuntime(proxy.Which, proxy.FrontWhich, proxy.Core)
 		if err != nil {
 			return err
 		}
@@ -436,6 +490,11 @@ func GetDockerProxies() ([]configure.DockerProxy, error) {
 	proxies, err := configure.GetDockerProxies()
 	if err != nil {
 		return nil, err
+	}
+	for i := range proxies {
+		if proxies[i].Core == "" {
+			proxies[i].Core = configure.DockerProxyCoreAuto
+		}
 	}
 
 	// Sync status with actual docker container status

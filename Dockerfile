@@ -29,12 +29,18 @@ COPY --from=version /build/version ./
 COPY --from=builder-web /build/web server/router/web
 RUN CGO_ENABLED=0 go build -ldflags="-X github.com/v2rayA/v2rayA/conf.Version=$(cat ./version) -s -w" -o v2raya-plus .
 
+FROM teddysun/xray:latest AS xray-core
+
 FROM v2fly/v2fly-core
 COPY --from=builder /build/service/v2raya-plus /usr/bin/
-RUN wget -O /usr/local/share/v2ray/LoyalsoldierSite.dat https://raw.githubusercontent.com/mzz2017/dist-v2ray-rules-dat/master/geosite.dat
+COPY --from=xray-core /usr/bin/xray /usr/bin/xray
+COPY --from=xray-core /usr/share/xray /usr/share/xray
+RUN wget -O /usr/local/share/v2ray/LoyalsoldierSite.dat https://raw.githubusercontent.com/mzz2017/dist-v2ray-rules-dat/master/geosite.dat \
+    && ln -s /usr/local/share/v2ray/LoyalsoldierSite.dat /usr/share/xray/LoyalsoldierSite.dat
 RUN apk add --no-cache iptables ip6tables nftables iproute2 tzdata docker-cli
 LABEL org.opencontainers.image.source=https://github.com/v2rayA/v2rayA
 EXPOSE 2017
-ENV V2RAYA_CONFIG /etc/v2raya-plus
+ENV V2RAYA_CONFIG=/etc/v2raya-plus
+ENV V2RAYA_CORE=v2fly
 VOLUME /etc/v2raya-plus
 ENTRYPOINT ["v2raya-plus"]

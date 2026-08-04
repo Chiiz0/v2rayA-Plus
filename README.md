@@ -39,12 +39,24 @@ docker compose up -d
 # Navigate to: http://localhost:2017
 ```
 
+The image bundles both V2Fly and Xray. V2Fly remains the default; to use Xray for the main connection and transparent proxy (for example, VLESS Vision / REALITY nodes), run:
+
+```bash
+V2RAYA_CORE=xray docker compose up -d
+```
+
 ### Ubuntu 24 / 26 Server Install (Docker + Host Transparent Proxy)
 
 If the host itself needs v2rayA-Plus transparent proxy while this project still creates Docker SOCKS proxy nodes, use the dedicated installer:
 
 ```bash
 sudo bash scripts/install-ubuntu-transparent.sh
+```
+
+To use Xray for the main service:
+
+```bash
+sudo CORE="xray" bash scripts/install-ubuntu-transparent.sh
 ```
 
 By default, the script installs Docker / nftables dependencies on Ubuntu 24.x / 26.x, builds the current project image, and deploys it under `/opt/v2raya-plus`. The main service uses `network_mode: host`, so the Web UI still listens on `2017` and transparent proxy rules are written into the host network namespace.
@@ -112,7 +124,7 @@ The signature feature of v2rayA-Plus. It allows you to run multiple V2Ray nodes 
 3. The backend automatically:
    - Generates a V2Ray config for that node.
    - Writes the config to a Docker volume using an `alpine` helper container.
-   - Starts a `v2fly/v2fly-core` container bound to `<host>:<port>`.
+   - Starts a V2Fly or Xray container, selected in the dialog, bound to `<host>:<port>`.
 4. The SOCKS5 proxy is now available at `localhost:1085` on the host.
 5. Manage all active proxy containers from the **Docker Proxies** tab in the UI; existing proxies can be edited, paused, resumed, or released.
 
@@ -125,6 +137,7 @@ The signature feature of v2rayA-Plus. It allows you to run multiple V2Ray nodes 
 | Variable | Default | Description |
 |---|---|---|
 | `V2RAYA_CONFIG` | `/etc/v2raya-plus` | Path where v2rayA-Plus stores its configuration and database |
+| `V2RAYA_CORE` | `v2fly` | Main service core: `auto`, `v2fly`, or `xray`; Vision / REALITY nodes should use `xray` |
 | `V2RAYA_ADDRESS` | `0.0.0.0:2017` | Address and port the web service listens on |
 | `V2RAYA_LOG_LEVEL` | `info` | Log verbosity: `trace`, `debug`, `info`, `warn`, `error` |
 | `V2RAYA_DOCKER_PROXY_NETWORK` | `v2raya-plus-proxy` | Dedicated Docker network used by generated proxy node containers |
@@ -172,8 +185,8 @@ v2rayA-Plus/
 ### IP Forwarding
 IP Forward (`/proc/sys/net/ipv4/ip_forward`) is only written to `1` when explicitly enabled in settings. When disabled, the host system value is **never modified**, preventing disruption to Docker's own networking.
 
-### Docker Proxy Image Resolution
-When creating a proxy container, the image tag is dynamically resolved from the running v2ray-core version (e.g. `v2fly/v2fly-core:v5.41.0`). If the version cannot be determined, it falls back to `latest`.
+### Core Selection and Docker Proxy Images
+The main image bundles V2Fly and Xray, selected through `V2RAYA_CORE`. Each Docker proxy can independently select Auto, V2Fly, or Xray. Auto follows the main service core. V2Fly uses the image tag matching the running version (for example, `v2fly/v2fly-core:v5.41.0`) and falls back to `latest` when unavailable. Xray uses `teddysun/xray:latest`.
 
 ### Configuration Volume Isolation
 Each Docker Proxy container gets its own named volume (`v2raya-socks-<port>`) with the generated config written via an `alpine` helper container (since `v2fly-core` uses a distroless image without a shell).
@@ -192,4 +205,5 @@ This project is licensed under the **GNU Affero General Public License v3.0**, i
 
 - [v2rayA](https://github.com/v2rayA/v2rayA) — Original project by mzz2017 and contributors
 - [v2fly/v2fly-core](https://github.com/v2fly/v2ray-core) — V2Ray core engine
+- [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — Xray core engine
 - [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) — GeoSite/GeoIP rule data

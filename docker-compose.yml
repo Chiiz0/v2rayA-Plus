@@ -7,6 +7,7 @@ services:
     restart: always
     environment:
       - V2RAYA_CONFIG=/etc/v2raya-plus
+      - V2RAYA_CORE=${V2RAYA_CORE:-v2fly}
     volumes:
       - /lib/modules:/lib/modules:ro
       - /var/run/docker.sock:/var/run/docker.sock

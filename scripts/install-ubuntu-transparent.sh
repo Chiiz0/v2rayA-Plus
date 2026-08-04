@@ -7,6 +7,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-v2raya-plus}"
 WEB_PORT="${WEB_PORT:-2017}"
 PROXY_NETWORK="${PROXY_NETWORK:-v2raya-plus-proxy}"
 PROXY_NETWORK_SUBNET="${PROXY_NETWORK_SUBNET:-}"
+CORE="${CORE:-v2fly}"
 BUILD_IMAGE="${BUILD_IMAGE:-1}"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-v2raya-plus}"
 
@@ -236,6 +237,7 @@ services:
     restart: unless-stopped
     environment:
       V2RAYA_CONFIG: /etc/v2raya-plus
+      V2RAYA_CORE: "${CORE}"
       V2RAYA_ADDRESS: "0.0.0.0:${WEB_PORT}"
       V2RAYA_NFTABLES_SUPPORT: "on"
       V2RAYA_TRANSPARENT_HOOK: /usr/local/bin/v2raya-plus-docker-bypass

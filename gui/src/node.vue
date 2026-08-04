@@ -622,6 +622,21 @@
               </b-table-column>
               <b-table-column
                 v-slot="props"
+                field="core"
+                :label="$t('dockerProxies.colCore')"
+                sortable
+              >
+                <span
+                  :class="[
+                    'tag',
+                    props.row.core === 'xray' ? 'is-dark' : 'is-light',
+                  ]"
+                >
+                  {{ formatDockerProxyCore(props.row.core) }}
+                </span>
+              </b-table-column>
+              <b-table-column
+                v-slot="props"
                 field="pingLatency"
                 :label="$t('server.latency')"
                 sortable
@@ -754,6 +769,31 @@
                 {{ formatDockerProxyOption(s) }}
               </option>
             </b-select>
+          </b-field>
+          <b-field :label="$t('dockerProxies.coreLabel')">
+            <div class="buttons has-addons">
+              <b-radio-button
+                v-model="dockerProxyCore"
+                native-value="auto"
+                type="is-info"
+              >
+                {{ $t("dockerProxies.coreAuto") }}
+              </b-radio-button>
+              <b-radio-button
+                v-model="dockerProxyCore"
+                native-value="v2fly"
+                type="is-info"
+              >
+                {{ $t("dockerProxies.coreV2fly") }}
+              </b-radio-button>
+              <b-radio-button
+                v-model="dockerProxyCore"
+                native-value="xray"
+                type="is-info"
+              >
+                {{ $t("dockerProxies.coreXray") }}
+              </b-radio-button>
+            </div>
           </b-field>
           <b-field :label="$t('dockerProxies.portLabel')">
             <b-input
@@ -984,6 +1024,7 @@ export default {
       dockerProxyTargetWhich: null,
       dockerProxyPort: null,
       dockerProxyFrontWhich: null,
+      dockerProxyCore: "auto",
       dockerProxySubmitting: false,
       connectedServerInTab: {
         subscriptionServer: Array(100),
@@ -1951,7 +1992,15 @@ export default {
       const name = s.name || s.address || s.id;
       return `${prefix}${name}${s.address ? ` (${s.address})` : ""}`;
     },
-    openDockerProxyModal({ editing, port, which, frontWhich }) {
+    formatDockerProxyCore(core) {
+      const keys = {
+        auto: "dockerProxies.coreAuto",
+        v2fly: "dockerProxies.coreV2fly",
+        xray: "dockerProxies.coreXray",
+      };
+      return this.$t(keys[core] || keys.auto);
+    },
+    openDockerProxyModal({ editing, port, which, frontWhich, core }) {
       const target = this.findDockerProxyOption(which) || which;
       const front = frontWhich
         ? this.findDockerProxyOption(frontWhich) || frontWhich
@@ -1959,6 +2008,7 @@ export default {
       this.dockerProxyEditing = editing;
       this.dockerProxyTargetWhich = target;
       this.dockerProxyPort = port;
+      this.dockerProxyCore = core || "auto";
       this.dockerProxyFrontWhich =
         front && !this.isSameDockerProxyWhich(front, target) ? front : null;
       this.showModalDockerProxy = true;
@@ -1988,6 +2038,7 @@ export default {
         port: null,
         which,
         frontWhich: null,
+        core: "auto",
       });
     },
     submitDockerProxy() {
@@ -2014,6 +2065,7 @@ export default {
       const data = {
         which: this.normalizeDockerProxyWhich(this.dockerProxyTargetWhich),
         port: port,
+        core: this.dockerProxyCore,
       };
       if (this.dockerProxyFrontWhich) {
         data.frontWhich = this.normalizeDockerProxyWhich(
@@ -2056,6 +2108,7 @@ export default {
         port: row.port,
         which: row.which,
         frontWhich: row.frontWhich || null,
+        core: row.core || "auto",
       });
     },
     handlePauseDockerProxy(row) {
