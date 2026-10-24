@@ -31,11 +31,13 @@ WORKDIR /build/service
 COPY --from=version /build/version ./
 COPY --from=builder-web /build/web server/router/web
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-X github.com/v2rayA/v2rayA/conf.Version=$(cat ./version) -s -w" -o v2raya-plus .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o v2raya-db ./cmd/v2raya-db
 
 FROM teddysun/xray:latest AS xray-core
 
 FROM v2fly/v2fly-core
 COPY --from=builder /build/service/v2raya-plus /usr/bin/
+COPY --from=builder /build/service/v2raya-db /usr/bin/
 COPY --from=xray-core /usr/bin/xray /usr/bin/xray
 COPY --from=xray-core /usr/share/xray /usr/share/xray
 RUN wget -O /usr/local/share/v2ray/LoyalsoldierSite.dat https://raw.githubusercontent.com/mzz2017/dist-v2ray-rules-dat/master/geosite.dat \

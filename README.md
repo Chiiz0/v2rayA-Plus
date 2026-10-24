@@ -148,6 +148,10 @@ Deleting nodes or subscriptions used by a Docker proxy is blocked, including fro
 
 ## 🛠️ Development & Build
 
+### Offline database backup
+
+The image includes `v2raya-db` for complete BoltDB export, verification, and restoration to a new file. It preserves accounts, Docker references, outbound settings, and unknown data. Stop the main service before exporting; save DNS recovery data and Docker volumes separately. See [backup and recovery commands](docs/database-backup.md).
+
 ### Build the Docker image
 
 ```bash
