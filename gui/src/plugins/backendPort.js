@@ -10,3 +10,9 @@ if (ba == null) {
   // }
   localStorage.setItem("backendAddress", "");
 }
+
+// The classic UI lives alongside the modern one. Both share the same API prefix.
+const prefix = location.pathname.replace(/\/legacy\/?$/, "").replace(/\/$/, "");
+if ((!ba || (ba.startsWith("/") && !ba.startsWith("//"))) && location.pathname.endsWith("/legacy/")) {
+  localStorage.setItem("backendAddress", prefix);
+}

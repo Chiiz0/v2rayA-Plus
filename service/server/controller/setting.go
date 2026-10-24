@@ -1,10 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
 	"github.com/gin-gonic/gin"
 	"github.com/v2rayA/v2rayA/common"
 	"github.com/v2rayA/v2rayA/core/v2ray/asset"
-	"github.com/v2rayA/v2rayA/db/configure"
 	"github.com/v2rayA/v2rayA/server/service"
 )
 
@@ -36,20 +36,15 @@ func PutSetting(ctx *gin.Context) {
 		updatingMu.Unlock()
 	}()
 
-	var data configure.Setting
+	var data json.RawMessage
 	err := ctx.ShouldBindJSON(&data)
 	if err != nil {
 		common.ResponseError(ctx, logError("bad request"))
 		return
 	}
-	if data.MuxOn == configure.Yes && (data.Mux < 1 || data.Mux > 1024) {
-		common.ResponseError(ctx, logError("mux should be between 1 and 1024"))
-		return
-	}
-	err = service.UpdateSetting(&data)
+	err = service.PatchSetting(data)
 	if err != nil {
 		common.ResponseError(ctx, logError(err))
-		_ = service.StopV2ray()
 		return
 	}
 	common.ResponseSuccess(ctx, nil)

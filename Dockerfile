@@ -15,13 +15,14 @@ RUN VERSION=$(cat ./version); \
 
 
 # Static web assets are shared by every target; avoid running Node under QEMU.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS builder-web
-ADD gui /build/gui
+FROM --platform=$BUILDPLATFORM node:24-alpine AS builder-web
+COPY gui-next /build/gui-next
+WORKDIR /build/gui-next
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+RUN yarn install --frozen-lockfile --ignore-engines --network-timeout 600000 && yarn build
+COPY gui /build/gui
 WORKDIR /build/gui
-RUN echo "network-timeout 600000" >> .yarnrc
-#RUN yarn config set registry https://registry.npm.taobao.org
-#RUN yarn config set sass_binary_site https://cdn.npm.taobao.org/dist/node-sass -g
-RUN yarn cache clean && yarn install --ignore-engines && yarn build
+RUN yarn install --frozen-lockfile --ignore-engines --network-timeout 600000 && OUTPUT_DIR=../web/legacy yarn build
 
 FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS builder
 ARG TARGETOS
@@ -43,7 +44,7 @@ COPY --from=xray-core /usr/share/xray /usr/share/xray
 RUN wget -O /usr/local/share/v2ray/LoyalsoldierSite.dat https://raw.githubusercontent.com/mzz2017/dist-v2ray-rules-dat/master/geosite.dat \
     && ln -s /usr/local/share/v2ray/LoyalsoldierSite.dat /usr/share/xray/LoyalsoldierSite.dat
 RUN apk add --no-cache iptables ip6tables nftables iproute2 tzdata docker-cli
-LABEL org.opencontainers.image.source=https://github.com/v2rayA/v2rayA
+LABEL org.opencontainers.image.source=https://github.com/Chiiz0/v2rayA-Plus
 EXPOSE 2017
 ENV V2RAYA_CONFIG=/etc/v2raya-plus
 ENV V2RAYA_CORE=v2fly

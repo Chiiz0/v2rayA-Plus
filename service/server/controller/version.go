@@ -7,7 +7,11 @@ import (
 	"github.com/v2rayA/v2rayA/core/v2ray/asset/dat"
 	"github.com/v2rayA/v2rayA/core/v2ray/service"
 	"github.com/v2rayA/v2rayA/core/v2ray/where"
+	"github.com/v2rayA/v2rayA/db"
+	"github.com/v2rayA/v2rayA/db/configure"
 	"net/http"
+	"os"
+	"runtime"
 )
 
 func GetVersion(ctx *gin.Context) {
@@ -16,6 +20,12 @@ func GetVersion(ctx *gin.Context) {
 		lite = 1
 	}
 	variant, versionErr := service.CheckV5()
+	_, coreVersion, _ := where.GetV2rayServiceVersion()
+	versionMessage := ""
+	if versionErr != nil {
+		versionMessage = versionErr.Error()
+	}
+	_, tunErr := os.Stat("/dev/net/tun")
 	common.ResponseSuccess(ctx, gin.H{
 		"version":          conf.Version,
 		"foundNew":         conf.FoundNew,
@@ -25,6 +35,15 @@ func GetVersion(ctx *gin.Context) {
 		"lite":             lite,
 		"loadBalanceValid": variant == where.V2ray && versionErr == nil,
 		"variant":          variant,
+		"coreVersion":      coreVersion,
+		"coreVersionValid": versionErr == nil,
+		"coreVersionErr":   versionMessage,
+		"os":               runtime.GOOS,
+		"isRoot":           os.Geteuid() == 0,
+		"tunSupported":     runtime.GOOS == "linux" && tunErr == nil,
+		"docker":           common.IsDocker(),
+		"hasAccounts":      configure.HasAnyAccounts(),
+		"databaseBackend":  db.Backend(),
 	})
 }
 

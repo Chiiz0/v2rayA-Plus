@@ -45,6 +45,16 @@ The image bundles both V2Fly and Xray. V2Fly remains the default; to use Xray fo
 V2RAYA_CORE=xray docker compose up -d
 ```
 
+### Interfaces and database backend
+
+The modern Vue 3 interface is the default at `http://localhost:2017/`. The classic interface remains at `http://localhost:2017/legacy/`, with links in navigation and About. Both share accounts, nodes, Docker proxies and settings; switching interfaces does not migrate the database.
+
+Existing deployments continue to use Bolt by default. SQLite can be enabled through the [offline migration, backup and rollback workflow](docs/sqlite-runtime.md), preserving the complete KV data. About displays the actual running backend.
+
+### Image release policy
+
+Ordinary commits, pull requests and manual runs validate the project without creating new Packages. GHCR images are published only after a valid `vMAJOR.MINOR.PATCH` tag (optionally with a prerelease suffix) passes tests. Stable releases update `latest`; prereleases do not overwrite it.
+
 ### Ubuntu 24 / 26 Server Install (Docker + Host Transparent Proxy)
 
 If the host itself needs v2rayA-Plus transparent proxy while this project still creates Docker SOCKS proxy nodes, use the dedicated installer:
@@ -171,7 +181,8 @@ v2rayA-Plus/
 ├── Dockerfile              # Multi-stage build: node → golang → v2fly-core runner
 ├── docker-compose.yml      # Published GHCR image orchestration
 ├── docker-compose.dev.yml  # Local development build orchestration
-├── gui/                    # Vue.js 2 frontend
+├── gui-next/               # Default Vue 3 / Vuetify / Pinia / Vite interface
+├── gui/                    # Classic Vue.js 2 interface at /legacy/
 │   └── src/
 │       ├── locales/        # i18n: en.js, zh.js (+ fa-ir, pt-br, ru)
 │       └── node.vue        # Main node management view (incl. Docker Proxies tab)
@@ -181,7 +192,7 @@ v2rayA-Plus/
     │   ├── controller/     # HTTP handlers (incl. dockerProxy.go)
     │   ├── router/         # Gin route registration
     │   └── service/        # Business logic (incl. dockerProxy.go)
-    └── db/configure/       # BoltDB persistence (incl. dockerProxy.go)
+    └── db/configure/       # Shared Bolt/SQLite configuration (incl. dockerProxy.go)
 ```
 
 ---

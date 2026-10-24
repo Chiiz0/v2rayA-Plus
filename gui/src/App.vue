@@ -2,7 +2,7 @@
   <div id="app">
     <b-navbar ref="navs" fixed-top shadow type="is-light">
       <template slot="brand">
-        <b-navbar-item href="/">
+        <b-navbar-item :href="homeHref">
           <img
             src="@/assets/img/logo2.png"
             alt="v2rayA-Plus"
@@ -206,6 +206,9 @@ export default {
     };
   },
   computed: {
+    homeHref() {
+      return location.pathname.endsWith("/legacy/") ? "../" : "./";
+    },
     username() {
       let token = localStorage["token"];
       if (!token) {

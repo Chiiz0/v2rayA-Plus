@@ -11,6 +11,10 @@ import (
 
 var loginSessions = make(chan interface{}, 1)
 
+func GetAccount(ctx *gin.Context) {
+	common.ResponseSuccess(ctx, gin.H{"hasAnyAccounts": configure.HasAnyAccounts()})
+}
+
 func PostLogin(ctx *gin.Context) {
 	var data struct {
 		Username string `json:"username"`

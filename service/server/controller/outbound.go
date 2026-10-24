@@ -14,6 +14,22 @@ func GetOutbounds(ctx *gin.Context) {
 	})
 }
 
+func PutOutboundConnections(ctx *gin.Context) {
+	var data struct {
+		Outbound string              `json:"outbound"`
+		Touches  *[]*configure.Which `json:"touches"`
+	}
+	if err := ctx.ShouldBindJSON(&data); err != nil || data.Touches == nil {
+		common.ResponseError(ctx, logError("bad request: touches must be an array"))
+		return
+	}
+	if err := service.UpdateOutboundConnections(data.Outbound, *data.Touches); err != nil {
+		common.ResponseError(ctx, logError(err))
+		return
+	}
+	getTouch(ctx)
+}
+
 func PostOutbound(ctx *gin.Context) {
 	var data struct {
 		Outbound string `json:"outbound"`

@@ -45,6 +45,16 @@ docker compose up -d
 V2RAYA_CORE=xray docker compose up -d
 ```
 
+### 界面与数据后端
+
+新版 Vue 3 管理界面默认位于 `http://localhost:2017/`，经典界面保留在 `http://localhost:2017/legacy/`，也可从导航或关于页面进入。两者共用账户、节点、Docker 代理和设置；切换界面不会迁移数据库。
+
+已有部署默认继续使用 Bolt。SQLite 可通过[离线迁移、备份和回滚流程](docs/sqlite-runtime.md)显式启用，保留完整 KV 数据；关于页面显示实际运行后端。
+
+### 镜像发布规则
+
+普通提交、PR 和手动运行只执行验证，不再为每次提交生成新的 Packages。推送合法的 `vMAJOR.MINOR.PATCH`（可带预发布后缀）标签并通过测试后才发布 GHCR 镜像；稳定版本更新 `latest`，预发布版本不覆盖它。
+
 ### Ubuntu 24 / 26 服务器一键安装（Docker + 宿主机透明代理）
 
 如果宿主机本身也需要使用 v2rayA-Plus 的透明代理，同时仍然需要通过项目创建 Docker SOCKS 节点，使用专用安装脚本：
@@ -175,7 +185,8 @@ v2rayA-Plus/
 ├── Dockerfile              # 多阶段构建：node → golang → v2fly-core runner
 ├── docker-compose.yml      # 使用已发布 GHCR 镜像的编排配置
 ├── docker-compose.dev.yml  # 本地开发与构建编排配置
-├── gui/                    # Vue.js 2 前端
+├── gui-next/               # 默认 Vue 3 / Vuetify / Pinia / Vite 界面
+├── gui/                    # /legacy/ 经典 Vue.js 2 界面
 │   └── src/
 │       ├── locales/        # i18n：en.js, zh.js（+ fa-ir, pt-br, ru）
 │       └── node.vue        # 节点管理主视图（含 Docker 代理标签页）
@@ -185,7 +196,7 @@ v2rayA-Plus/
     │   ├── controller/     # HTTP 请求处理（含 dockerProxy.go）
     │   ├── router/         # Gin 路由注册
     │   └── service/        # 业务逻辑（含 dockerProxy.go）
-    └── db/configure/       # BoltDB 持久化（含 dockerProxy.go）
+    └── db/configure/       # Bolt/SQLite 共用配置层（含 dockerProxy.go）
 ```
 
 ---

@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"embed"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -58,53 +57,15 @@ func cachedHTML(html []byte) func(ctx *gin.Context) {
 }
 
 func ServeGUI(r *gin.Engine) {
+	var webFS fs.FS
 	webDir := conf.GetEnvironmentConfig().WebDir
 	if webDir == "" {
-		webFS, err := fs.Sub(webRoot, "web")
-		if err != nil {
-			log.Fatal("fs.Sub: %v", err)
-		}
-		ss := http.StripPrefix("/static", statigz.FileServer(webFS.(fs.ReadDirFS)))
-		r.GET("/static/*w", func(c *gin.Context) {
-			ss.ServeHTTP(c.Writer, c.Request)
-		})
-		f, err := webFS.Open("index.html")
-		if err != nil {
-			log.Fatal("webFS.Open index.html:", err)
-		}
-		defer f.Close()
-		html, err := io.ReadAll(f)
-		if err != nil {
-			log.Fatal("ReadAll index.html: %v", err)
-		}
-		r.GET("/", cachedHTML(html))
+		webFS, _ = fs.Sub(webRoot, "web")
 	} else {
-		if _, err := os.Stat(webDir); os.IsNotExist(err) {
-			log.Warn("web files cannot be found at %v. web UI cannot be served", webDir)
-		} else {
-			filepath.Walk(webDir, func(path string, info os.FileInfo, err error) error {
-				if path == webDir {
-					return nil
-				}
-				if info.IsDir() {
-					r.Static("/static/"+info.Name(), path)
-					return filepath.SkipDir
-				}
-				r.StaticFile("/static/"+info.Name(), path)
-				return nil
-			})
-
-			f, err := os.Open(filepath.Join(webDir, "index.html"))
-			if err != nil {
-				log.Fatal("Open index.html: %v", err)
-			}
-			defer f.Close()
-			html, err := io.ReadAll(f)
-			if err != nil {
-				log.Fatal("ReadAll index.html: %v", err)
-			}
-			r.GET("/", cachedHTML(html))
-		}
+		webFS = os.DirFS(webDir)
+	}
+	if err := serveWebFiles(r, webFS); err != nil {
+		log.Warn("web UI cannot be served: %v", err)
 	}
 
 	app := conf.GetEnvironmentConfig()
@@ -120,6 +81,37 @@ func ServeGUI(r *gin.Engine) {
 	} else {
 		printRunningAt("http://" + app.Address)
 	}
+}
+
+// serveWebFiles supports the dual build and externally supplied legacy assets.
+// statigz serves both plain Vite files and the classic build's gzip-only files.
+func serveWebFiles(r *gin.Engine, webFS fs.FS) error {
+	html, err := fs.ReadFile(webFS, "index.html")
+	if err != nil {
+		return err
+	}
+	dirFS, ok := webFS.(fs.ReadDirFS)
+	if !ok {
+		return fmt.Errorf("web filesystem does not support directory reads")
+	}
+	var assets http.Handler = statigz.FileServer(dirFS)
+	if _, err := fs.Stat(webFS, "static"); err != nil {
+		assets = http.StripPrefix("/static", assets)
+	}
+	r.GET("/static/*w", gin.WrapH(assets))
+	r.GET("/", cachedHTML(html))
+	for _, name := range []string{"favicon.ico", "robots.txt"} {
+		r.GET("/"+name, gin.WrapH(statigz.FileServer(dirFS)))
+	}
+	legacy, err := fs.Sub(webFS, "legacy")
+	if err == nil {
+		if html, e := fs.ReadFile(legacy, "index.html"); e == nil {
+			r.GET("/legacy/", cachedHTML(html))
+			r.GET("/legacy", func(c *gin.Context) { c.Header("Location", "legacy/"); c.Status(http.StatusTemporaryRedirect) })
+			r.GET("/legacy/static/*w", gin.WrapH(http.StripPrefix("/legacy/static", statigz.FileServer(legacy.(fs.ReadDirFS)))))
+		}
+	}
+	return nil
 }
 
 func nocache(c *gin.Context) {
@@ -149,6 +141,7 @@ func Run() error {
 		noAuth.GET("version", controller.GetVersion)
 		noAuth.POST("login", controller.PostLogin)
 		noAuth.POST("account", controller.PostAccount)
+		noAuth.GET("account", controller.GetAccount)
 	}
 	auth := engine.Group("api",
 		nocache,
@@ -169,6 +162,7 @@ func Run() error {
 		auth.GET("touch", controller.GetTouch)
 		auth.DELETE("touch", controller.DeleteTouch)
 		auth.POST("connection", controller.PostConnection)
+		auth.PUT("outboundConnections", controller.PutOutboundConnections)
 		auth.DELETE("connection", controller.DeleteConnection)
 		auth.POST("v2ray", controller.PostV2ray)
 		auth.DELETE("v2ray", controller.DeleteV2ray)
