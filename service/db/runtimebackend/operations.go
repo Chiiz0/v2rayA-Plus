@@ -80,20 +80,18 @@ func Restore(configDir, archivePath string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	fresh, err := initialArchive()
-	if err != nil {
-		return Result{}, err
-	}
-	// Preserve the meaning of a backup made between runtime-init and the
-	// first service startup. Only the exact empty-installation snapshot is
-	// recognized; an unknown sentinel among application data is left alone.
-	return initialize(configDir, archive, archive.Manifest == fresh.Manifest)
+	return initialize(configDir, archive, archive.Source.InitializeDefaults)
 }
 
 func initialArchive() (*backup.Archive, error) {
-	return backup.NewSnapshot("sqlite", []backup.Bucket{{
+	archive, err := backup.NewSnapshot("sqlite", []backup.Bucket{{
 		Name: []byte(DefaultsBucket), Values: []backup.Value{{Key: []byte(DefaultsKey), Data: []byte(DefaultsValue)}},
 	}})
+	if err != nil {
+		return nil, err
+	}
+	archive.Source.InitializeDefaults = true
+	return archive, backup.Validate(archive)
 }
 
 func initialize(configDir string, archive *backup.Archive, defaults bool) (Result, error) {
@@ -182,10 +180,38 @@ func Verify(configDir string) (Result, error) {
 
 func snapshot(dir string, selection Selection) (*backup.Archive, error) {
 	path := filepath.Join(dir, selection.Database)
+	var archive *backup.Archive
+	var err error
 	if selection.Backend == "sqlite" {
-		return sqlitestore.SnapshotReadOnly(path)
+		archive, err = sqlitestore.SnapshotReadOnly(path)
+	} else {
+		archive, err = backup.Export(path, lockTimeout)
 	}
-	return backup.Export(path, lockTimeout)
+	if err != nil {
+		return nil, err
+	}
+	if selection.Initialize {
+		for _, bucket := range archive.Buckets {
+			if string(bucket.Name) != DefaultsBucket {
+				continue
+			}
+			for _, value := range bucket.Values {
+				if string(value.Key) == DefaultsKey && string(value.Data) == DefaultsValue {
+					// A fresh installation can be rolled back to Bolt before its
+					// first startup. Use v2 to retain this explicit lifecycle intent.
+					if archive.Version == backup.FormatVersion {
+						archive, err = backup.NewSnapshot("bbolt", archive.Buckets)
+						if err != nil {
+							return nil, err
+						}
+					}
+					archive.Source.InitializeDefaults = true
+					return archive, backup.Validate(archive)
+				}
+			}
+		}
+	}
+	return archive, nil
 }
 
 func install(dir string, archive *backup.Archive, backend string, initialize bool, hook func(string) error) (Result, error) {
@@ -204,7 +230,7 @@ func install(dir string, archive *backup.Archive, backend string, initialize boo
 		if err != nil {
 			return Result{}, err
 		}
-		if existing.Manifest != archive.Manifest {
+		if existing.Manifest != archive.Manifest || existing.Source.InitializeDefaults != archive.Source.InitializeDefaults {
 			return Result{}, errors.New("existing migration archive differs from the current source")
 		}
 	} else if errors.Is(err, os.ErrNotExist) {

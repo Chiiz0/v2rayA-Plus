@@ -183,11 +183,53 @@ func TestRuntimeCommandsRestoreBothArchiveVersionsAndInit(t *testing.T) {
 	// application defaults instead of leaving the service with empty ports.
 	output := filepath.Join(t.TempDir(), "before-first-start.json")
 	invokeRuntime(t, 0, "runtime-export", "--config-dir", directory, "--out", output)
+	pending, err := backup.Read(output)
+	if err != nil || !pending.Source.InitializeDefaults {
+		t.Fatalf("fresh backup omitted explicit initialization metadata: %v", err)
+	}
 	restoredDirectory := t.TempDir()
 	invokeRuntime(t, 0, "runtime-restore", "--config-dir", restoredDirectory, "--in", output)
 	restoredSelection, err := runtimebackend.ReadSelection(restoredDirectory)
 	if err != nil || !restoredSelection.Initialize {
 		t.Fatalf("restored fresh snapshot lost its pending defaults: %v", err)
+	}
+}
+
+func TestRuntimeRestoreDoesNotInferInitializationFromUnknownData(t *testing.T) {
+	archive, err := backup.NewSnapshot("sqlite", []backup.Bucket{{
+		Name:   []byte(backup.InitializationBucket),
+		Values: []backup.Value{{Key: []byte(backup.InitializationKey), Data: []byte(backup.InitializationValue)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(t.TempDir(), "source-bolt.db")
+	if err := backup.Restore(legacyPath, archive); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := backup.Export(legacyPath, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, plain := range map[string]*backup.Archive{"v1": legacy, "v2": archive} {
+		t.Run(name, func(t *testing.T) {
+			input := filepath.Join(t.TempDir(), "unknown-marker.json")
+			if err := backup.Write(input, plain); err != nil {
+				t.Fatal(err)
+			}
+			directory := t.TempDir()
+			invokeRuntime(t, 0, "runtime-restore", "--config-dir", directory, "--in", input)
+			selection, err := runtimebackend.ReadSelection(directory)
+			if err != nil || selection.Initialize {
+				t.Fatalf("unknown data was interpreted as initialization authority: %v", err)
+			}
+			output := filepath.Join(t.TempDir(), "exported.json")
+			invokeRuntime(t, 0, "runtime-export", "--config-dir", directory, "--out", output)
+			exported, err := backup.Read(output)
+			if err != nil || exported.Source.InitializeDefaults || exported.Manifest != plain.Manifest || !reflect.DeepEqual(exported.Buckets, plain.Buckets) {
+				t.Fatalf("unknown marker data or initialization intent changed: %v", err)
+			}
+		})
 	}
 }
 

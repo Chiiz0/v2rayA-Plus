@@ -37,7 +37,7 @@ v2raya-db runtime-verify --config-dir /path/to/restored-config
 
 SQLite 导出为 `v2raya-database-backup` 版本 `2`：`source.backend=sqlite`、`source.digestKind=logical-sha256`，`source.sha256` 是完整逻辑快照摘要，不冒充 SQLite 主文件的物理摘要。原 Bolt v1 归档仍受支持，旧 `export/verify/restore` 命令保持兼容。`runtime-restore` 接受 v1/v2，在新目录创建并选择 SQLite；`restore --in ... --db NEW_BOLT` 可从两种归档创建新 Bolt。
 
-尚未首次启动的精确空安装快照可以备份恢复，仍会请求默认配置初始化。包含其他应用数据的归档不会仅因有同名未知标记就触发初始化。归档中的密码哈希、节点凭据仍属私密数据；输出数据库、归档和选择记录权限为 `0600`。DNS 恢复记录、Docker 配置卷、Compose 和钩子继续单独备份，工具不会自动重建运行资源。
+尚未首次启动的新安装会在 v2 归档中显式保存 `source.initializeDefaults`，恢复后仍会请求默认配置初始化。没有这个元数据时，同名未知桶或值均按原始数据保留，不会根据名字或内容推断初始化意图。归档中的密码哈希、节点凭据仍属私密数据；输出数据库、归档和选择记录权限为 `0600`。DNS 恢复记录、Docker 配置卷、Compose 和钩子继续单独备份，工具不会自动重建运行资源。
 
 ## 保留新写入的回滚
 

@@ -151,3 +151,96 @@ func TestSnapshotRejectsInvalidOrExcessiveTrees(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotInitializationIntentIsExplicitAndRequiresMarker(t *testing.T) {
+	marker := Bucket{Name: []byte(InitializationBucket), Values: []Value{{Key: []byte(InitializationKey), Data: []byte(InitializationValue)}}}
+	archive, err := NewSnapshot("sqlite", []Bucket{marker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archive.Source.InitializeDefaults {
+		t.Fatal("pure snapshot inferred initialization intent from unknown data")
+	}
+	archive.Source.InitializeDefaults = true
+	path := filepath.Join(t.TempDir(), "explicit-intent.json")
+	if err := Write(path, archive); err != nil {
+		t.Fatal(err)
+	}
+	read, err := Read(path)
+	if err != nil || !reflect.DeepEqual(read, archive) {
+		t.Fatalf("initialization intent did not survive archive round trip: %v", err)
+	}
+	for name, buckets := range map[string][]Bucket{
+		"absent bucket": nil,
+		"absent key":    {{Name: []byte(InitializationBucket)}},
+		"wrong value":   {{Name: []byte(InitializationBucket), Values: []Value{{Key: []byte(InitializationKey), Data: []byte("false")}}}},
+		"empty value":   {{Name: []byte(InitializationBucket), Values: []Value{{Key: []byte(InitializationKey)}}}},
+		"nested bucket": {{Name: []byte("outer"), Buckets: []Bucket{marker}}},
+		"nested key":    {{Name: []byte(InitializationBucket), Buckets: []Bucket{{Name: []byte(InitializationKey)}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate, err := NewSnapshot("sqlite", buckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Validate(candidate); err != nil {
+				t.Fatalf("plain unknown data must be preserved: %v", err)
+			}
+			candidate.Source.InitializeDefaults = true
+			if err := Validate(candidate); err == nil {
+				t.Fatal("initialization intent without exact top-level marker accepted")
+			}
+		})
+	}
+	legacy := fixtureArchive(t)
+	legacy.Source.InitializeDefaults = true
+	if err := Validate(legacy); err == nil {
+		t.Fatal("v1 in-memory source accepted v2 initialization intent")
+	}
+}
+
+func TestArchiveInitializationIntentWireFormatIsStrict(t *testing.T) {
+	legacy := fixtureArchive(t)
+	snapshot, err := NewSnapshot("sqlite", legacy.Buckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, archive := range map[string]*Archive{"v1": legacy, "v2": snapshot} {
+		original, err := json.Marshal(archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range []string{
+			`"initializeDefaults":true,`,
+			`"initializeDefaults":null,`,
+			`"initializeDefaults":1,`,
+			`"InitializeDefaults":false,`,
+			`"initializeDefaults":false,"initializeDefaults":false,`,
+		} {
+			t.Run(name+"/"+entry, func(t *testing.T) {
+				data := bytes.Replace(original, []byte(`"source":{`), []byte(`"source":{`+entry), 1)
+				path := filepath.Join(t.TempDir(), "invalid.json")
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := Read(path); err == nil {
+					t.Fatal("ambiguous initialization metadata accepted")
+				}
+			})
+		}
+		// False is an explicitly supported v2 metadata value. Even false is
+		// forbidden in the frozen v1 wire format, where the field never existed.
+		data := bytes.Replace(original, []byte(`"source":{`), []byte(`"source":{"initializeDefaults":false,`), 1)
+		path := filepath.Join(t.TempDir(), "false-intent.json")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		read, err := Read(path)
+		if name == "v1" && err == nil {
+			t.Fatal("v1 wire format accepted explicit false initialization metadata")
+		}
+		if name == "v2" && (err != nil || read.Source.InitializeDefaults || read.Manifest != archive.Manifest) {
+			t.Fatalf("v2 explicit false failed or changed raw data: %v", err)
+		}
+	}
+}

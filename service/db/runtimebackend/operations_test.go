@@ -404,3 +404,70 @@ func TestVerifyDetectsMissingCompatibilityGuardButExportCanRecoverData(t *testin
 		t.Fatalf("cannot recover data after guard loss: %v", err)
 	}
 }
+
+func TestRestoreExactUnknownSentinelDoesNotInferInitialization(t *testing.T) {
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			fresh, err := initialArchive()
+			if err != nil {
+				t.Fatal(err)
+			}
+			unknown, err := backup.NewSnapshot("bbolt", fresh.Buckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if version == "v1" {
+				boltPath := filepath.Join(t.TempDir(), "source.db")
+				if err := backup.Restore(boltPath, unknown); err != nil {
+					t.Fatal(err)
+				}
+				unknown, err = backup.Export(boltPath, time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			archivePath := filepath.Join(t.TempDir(), "unknown.json")
+			if err := backup.Write(archivePath, unknown); err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			if _, err := Restore(dir, archivePath); err != nil {
+				t.Fatal(err)
+			}
+			selected, err := ReadSelection(dir)
+			if err != nil || selected.Initialize {
+				t.Fatalf("inferred initialization from raw bytes: %v", err)
+			}
+			actual, err := Export(dir)
+			if err != nil || actual.Manifest != unknown.Manifest || actual.Source.InitializeDefaults {
+				t.Fatalf("raw unknown data changed meaning: %v", err)
+			}
+		})
+	}
+}
+
+func TestPendingInitializationSurvivesBoltRollbackExport(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := InitSQLite(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Rollback(dir); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := Export(dir)
+	if err != nil || archive.Version != backup.SnapshotFormatVersion || !archive.Source.InitializeDefaults {
+		t.Fatalf("pending initialization lost in Bolt export: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "pending.json")
+	if err := backup.Write(path, archive); err != nil {
+		t.Fatal(err)
+	}
+	newDir := t.TempDir()
+	if _, err := Restore(newDir, path); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := ReadSelection(newDir)
+	if err != nil || !selected.Initialize {
+		t.Fatalf("pending initialization lost during restore: %v", err)
+	}
+}

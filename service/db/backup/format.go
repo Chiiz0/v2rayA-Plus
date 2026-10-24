@@ -20,6 +20,9 @@ const (
 	SnapshotFormatName    = "v2raya-database-backup"
 	SnapshotFormatVersion = 2
 	LogicalDigestKind     = "logical-sha256"
+	InitializationBucket  = "_v2raya_runtime"
+	InitializationKey     = "needs-defaults"
+	InitializationValue   = "1"
 	MaxDepth              = 64
 	MaxEntries            = 100000
 	MaxDataBytes          = 128 << 20
@@ -36,9 +39,10 @@ type Archive struct {
 }
 
 type Source struct {
-	Backend    string `json:"backend"`
-	SHA256     string `json:"sha256"`
-	DigestKind string `json:"digestKind,omitempty"`
+	Backend            string `json:"backend"`
+	SHA256             string `json:"sha256"`
+	DigestKind         string `json:"digestKind,omitempty"`
+	InitializeDefaults bool   `json:"initializeDefaults,omitempty"`
 }
 
 type Manifest struct {
@@ -76,7 +80,7 @@ func Validate(archive *Archive) error {
 		return fmt.Errorf("invalid backup creation time")
 	}
 	if !validDigest(archive.Source.SHA256) ||
-		legacy && (archive.Source.Backend != "bbolt" || archive.Source.DigestKind != "") ||
+		legacy && (archive.Source.Backend != "bbolt" || archive.Source.DigestKind != "" || archive.Source.InitializeDefaults) ||
 		snapshot && (archive.Source.Backend != "bbolt" && archive.Source.Backend != "sqlite" || archive.Source.DigestKind != LogicalDigestKind) {
 		return fmt.Errorf("invalid backup source metadata")
 	}
@@ -90,7 +94,24 @@ func Validate(archive *Archive) error {
 	if snapshot && archive.Source.SHA256 != manifest.LogicalSHA256 {
 		return fmt.Errorf("backup logical source checksum does not match its contents")
 	}
+	if archive.Source.InitializeDefaults && !hasInitializationMarker(archive.Buckets) {
+		return fmt.Errorf("backup initialization intent requires its pending-defaults marker")
+	}
 	return nil
+}
+
+func hasInitializationMarker(buckets []Bucket) bool {
+	for _, bucket := range buckets {
+		if !bytes.Equal(bucket.Name, []byte(InitializationBucket)) {
+			continue
+		}
+		for _, value := range bucket.Values {
+			if bytes.Equal(value.Key, []byte(InitializationKey)) {
+				return bytes.Equal(value.Data, []byte(InitializationValue))
+			}
+		}
+	}
+	return false
 }
 
 func validDigest(value string) bool {

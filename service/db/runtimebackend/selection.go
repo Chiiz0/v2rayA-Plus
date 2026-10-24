@@ -11,15 +11,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/v2rayA/v2rayA/db/backup"
 )
 
 const SelectionFilename = ".v2raya-database.json"
 
 // Only runtime-init requests application defaults. Ordinary imports must not
 // interpret similarly named unknown data as an initialization instruction.
-const DefaultsBucket = "_v2raya_runtime"
-const DefaultsKey = "needs-defaults"
-const DefaultsValue = "1"
+const DefaultsBucket = backup.InitializationBucket
+const DefaultsKey = backup.InitializationKey
+const DefaultsValue = backup.InitializationValue
 
 type Selection struct {
 	Version    int    `json:"version"`

@@ -161,16 +161,21 @@ func Read(path string) (*Archive, error) {
 	}
 	// The v1 wire format remains frozen: even an empty v2-only field must not
 	// silently change which documents the original reader accepted.
+	var fields struct {
+		Source map[string]json.RawMessage `json:"source"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, fmt.Errorf("invalid backup JSON schema")
+	}
 	if archive.Version == FormatVersion {
-		var fields struct {
-			Source map[string]json.RawMessage `json:"source"`
+		for _, name := range []string{"digestKind", "initializeDefaults"} {
+			if _, exists := fields.Source[name]; exists {
+				return nil, fmt.Errorf("version 1 backup source cannot contain %s", name)
+			}
 		}
-		if err := json.Unmarshal(data, &fields); err != nil {
-			return nil, fmt.Errorf("invalid backup JSON schema")
-		}
-		if _, exists := fields.Source["digestKind"]; exists {
-			return nil, fmt.Errorf("version 1 backup source cannot contain digestKind")
-		}
+	}
+	if value, present := fields.Source["initializeDefaults"]; present && !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
+		return nil, fmt.Errorf("backup initialization intent must be a boolean")
 	}
 	if err := Validate(&archive); err != nil {
 		return nil, err
@@ -235,7 +240,7 @@ func archiveJSONField(name string) bool {
 	// encoding/json otherwise accepts case-insensitive aliases even with
 	// DisallowUnknownFields, including a second spelling of the same field.
 	switch name {
-	case "format", "version", "createdAt", "source", "manifest", "buckets", "backend", "sha256", "digestKind",
+	case "format", "version", "createdAt", "source", "manifest", "buckets", "backend", "sha256", "digestKind", "initializeDefaults",
 		"values", "valueBytes", "logicalSHA256", "name", "sequence", "key", "data":
 		return true
 	default:
