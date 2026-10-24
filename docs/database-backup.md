@@ -1,6 +1,6 @@
 # 离线数据库备份与恢复
 
-`v2raya-db` 是独立的 Linux 命令，随 amd64/arm64 Docker 镜像提供。它不加载主服务配置，不启动核心、修改 DNS 或重建容器。运行后端仍为 BoltDB；完整归档也可用于[SQLite 离线迁移候选](sqlite-migration.md)的导入、验证和往返导出，不会切换后端。
+`v2raya-db` 是独立的 Linux 命令，随 amd64/arm64 Docker 镜像提供。它不加载主服务配置，不启动核心、修改 DNS 或重建容器。本页说明 Bolt v1 备份及外部文件恢复。已选择 SQLite 或回滚到新一代 Bolt 的部署，请使用[运行后端备份与回滚](sqlite-runtime.md)中的 `runtime-export --config-dir` 读取当前选中数据库，避免误备份历史 `bolt.db`。原 v1 归档及以下命令继续兼容。
 
 ## 备份范围
 

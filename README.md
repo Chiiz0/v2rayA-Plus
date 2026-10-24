@@ -216,6 +216,10 @@ Run `scripts/test-xhttp-docker.sh` for an isolated HTTP integration test with re
 ### Configuration Volume Isolation
 Each Docker Proxy container gets its own named volume (`v2raya-socks-<port>`) with the generated config written via an `alpine` helper container (since `v2fly-core` uses a distroless image without a shell).
 
+### Optional SQLite Runtime
+
+Existing installations continue to use Bolt by default. With the main service stopped, `v2raya-db runtime-migrate --config-dir /etc/v2raya-plus` preserves the complete database and selects a separate SQLite runtime with WAL and atomic transactions. `runtime-export` backs up the selected backend; `runtime-restore` installs an archive into a fresh directory; `runtime-rollback` restores the latest SQLite writes into a new Bolt generation. The original Bolt file is retained and must not be mistaken for current data. See the [SQLite runtime guide](docs/sqlite-runtime.md) (Chinese), including backup, interruption recovery, and downgrade steps for older binaries.
+
 ---
 
 ## 📄 License

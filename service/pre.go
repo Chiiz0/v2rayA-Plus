@@ -1,11 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"syscall"
@@ -23,6 +24,8 @@ import (
 	"github.com/v2rayA/v2rayA/core/v2ray/where"
 	"github.com/v2rayA/v2rayA/db"
 	"github.com/v2rayA/v2rayA/db/configure"
+	"github.com/v2rayA/v2rayA/db/runtimebackend"
+	"github.com/v2rayA/v2rayA/db/store"
 	"github.com/v2rayA/v2rayA/pkg/util/log"
 	"github.com/v2rayA/v2rayA/server/router"
 	"github.com/v2rayA/v2rayA/server/service"
@@ -84,36 +87,83 @@ func checkTProxySupportability() {
 	}
 }
 
-func initDBValue() {
+func initDBValue() error {
 	log.Info("init DB")
-	err := configure.SetConfigure(configure.New())
-	if err != nil {
-		log.Fatal("initDBValue: %v", err)
-	}
+	return configure.SetConfigure(configure.New())
 }
 
-func initConfigure(legacy *bbolt.DB) {
+// Only runtime-init may request defaults. Preserve every existing value, and
+// commit the defaults and sentinel removal together so retries cannot reset data.
+func initializeRequestedDefaults(backend store.Store) error {
+	defaults := configure.New()
+	values := []struct {
+		bucket, key string
+		value       interface{}
+	}{
+		{"touch", "servers", defaults.Servers},
+		{"touch", "subscriptions", defaults.Subscriptions},
+		{"system", "setting", defaults.Setting},
+		{"system", "ports", defaults.Ports},
+		{"system", "routingA", defaults.RoutingA},
+		{"system", "internalDnsList", defaults.InternalDnsList},
+		{"system", "externalDnsList", defaults.ExternalDnsList},
+		{"outbound.proxy", "connectedServers", configure.NewWhiches(defaults.ConnectedServers)},
+	}
+	return backend.Update(func(tx store.WriteTx) error {
+		sentinel, err := tx.Get([]byte(runtimebackend.DefaultsBucket), []byte(runtimebackend.DefaultsKey))
+		if err != nil || sentinel == nil {
+			return err
+		}
+		if !bytes.Equal(sentinel, []byte(runtimebackend.DefaultsValue)) {
+			return fmt.Errorf("invalid runtime database initialization marker")
+		}
+		for _, entry := range values {
+			old, err := tx.Get([]byte(entry.bucket), []byte(entry.key))
+			if err != nil {
+				return err
+			}
+			if old != nil {
+				continue
+			}
+			raw, err := json.Marshal(entry.value)
+			if err != nil {
+				return err
+			}
+			if err = tx.Put([]byte(entry.bucket), []byte(entry.key), raw); err != nil {
+				return err
+			}
+		}
+		return tx.Delete([]byte(runtimebackend.DefaultsBucket), []byte(runtimebackend.DefaultsKey))
+	})
+}
+
+func initConfigure(legacy *bbolt.DB) error {
 	//初始化配置
 	jsonIteratorExtra.RegisterFuzzyDecoders()
 
 	//db
 	resolverRecovered := false
-	dbPath := filepath.Join(conf.GetEnvironmentConfig().Config, "bolt.db")
-	if _, e := os.Lstat(dbPath); os.IsNotExist(e) {
+	dbPath, err := db.DatabasePath()
+	if err != nil {
+		return err
+	}
+	if _, e := os.Lstat(dbPath); db.Backend() == "bolt" && os.IsNotExist(e) {
 		previous, err := readLegacyConfiguration(legacy)
 		if err != nil {
-			log.Fatal("read legacy configuration: %v", err)
+			return fmt.Errorf("read legacy configuration: %w", err)
 		}
 		if previous != nil {
 			// There is different format in server and subscription.
 			// So we keep other content and reimport servers and subscriptions.
 			log.Warn("Migrating from v4 to main")
 			if err := publishLegacySnapshot(legacy, dbPath); err != nil {
-				log.Fatal("Failed to copy boltv4.db to bolt.db: %v", err)
+				return fmt.Errorf("copy legacy database to selected Bolt database: %w", err)
 			}
 			// Migration imports subscriptions below; restore DNS before those
 			// network requests or their missing-resolver checks can run.
-			recoverResolverOnStartup()
+			if err := recoverResolverOnStartup(); err != nil {
+				return err
+			}
 			resolverRecovered = true
 
 			// clear connects of outbounds
@@ -121,10 +171,10 @@ func initConfigure(legacy *bbolt.DB) {
 				_ = configure.ClearConnects(out)
 			}
 			if err := db.Set("touch", "servers", []interface{}{}); err != nil {
-				log.Fatal("prepare legacy servers: %v", err)
+				return fmt.Errorf("prepare legacy servers: %w", err)
 			}
 			if err := db.Set("touch", "subscriptions", []interface{}{}); err != nil {
-				log.Fatal("prepare legacy subscriptions: %v", err)
+				return fmt.Errorf("prepare legacy subscriptions: %w", err)
 			}
 
 			// migrate servers and subscriptions
@@ -142,11 +192,24 @@ func initConfigure(legacy *bbolt.DB) {
 
 			log.Warn("Migration is done")
 		} else {
-			initDBValue()
+			if err := initDBValue(); err != nil {
+				return fmt.Errorf("initialize configuration: %w", err)
+			}
+		}
+	}
+	if db.DefaultsRequested() {
+		backend, err := db.CurrentStore()
+		if err != nil {
+			return err
+		}
+		if err = initializeRequestedDefaults(backend); err != nil {
+			return fmt.Errorf("initialize runtime database defaults: %w", err)
 		}
 	}
 	if !resolverRecovered {
-		recoverResolverOnStartup()
+		if err := recoverResolverOnStartup(); err != nil {
+			return err
+		}
 	}
 
 	if len(configure.GetTproxyWhiteIpGroups().CountryCodes) == 0 {
@@ -167,7 +230,7 @@ func initConfigure(legacy *bbolt.DB) {
 			log.Alert("downloading missing geoip.dat and geosite.dat")
 			var l net.Listener
 			if l, err = net.Listen("tcp", conf.GetEnvironmentConfig().Address); err != nil {
-				log.Fatal("net.Listen: %v", err)
+				return fmt.Errorf("listen during asset download: %w", err)
 			}
 			e := gin.New()
 			e.GET("/", func(c *gin.Context) {
@@ -180,13 +243,15 @@ func initConfigure(legacy *bbolt.DB) {
 			if !asset.DoesV2rayAssetExist("geoip.dat") {
 				err := dat.UpdateLocalGeoIP()
 				if err != nil {
-					log.Fatal("UpdateLocalGeoIP: %v", err)
+					_ = l.Close()
+					return fmt.Errorf("update local GeoIP: %w", err)
 				}
 			}
 			if !asset.DoesV2rayAssetExist("geosite.dat") {
 				err = dat.UpdateLocalGeoSite()
 				if err != nil {
-					log.Fatal("UpdateLocalGeoSite: %v", err)
+					_ = l.Close()
+					return fmt.Errorf("update local GeoSite: %w", err)
 				}
 			}
 			if l != nil {
@@ -195,17 +260,19 @@ func initConfigure(legacy *bbolt.DB) {
 			log.Alert("geoip.dat and geosite.dat are ready")
 		}
 	}
+	return nil
 }
 
-func recoverResolverOnStartup() {
-	// The directory lock is already held. Also retain Bolt's exclusive lock to
-	// exclude older releases that do not know the directory lock file.
+func recoverResolverOnStartup() error {
+	// The directory lock is already held. Open the selected backend and retain
+	// Bolt compatibility locks before touching DNS owned by a previous run.
 	if err := db.Init(); err != nil {
-		log.Fatal("initialize database before DNS recovery: %v", err)
+		return fmt.Errorf("initialize database before DNS recovery: %w", err)
 	}
 	if err := v2ray.RecoverResolvConf(); err != nil {
 		log.Warn("restore DNS from the previous run: %v", err)
 	}
+	return nil
 }
 
 func hello() {
@@ -215,6 +282,7 @@ func hello() {
 	wd, _ := os.Getwd()
 	log.Alert("v2rayA working directory is %v", wd)
 	log.Alert("v2rayA configuration directory is %v", conf.GetEnvironmentConfig().Config)
+	log.Alert("Database backend: %v", db.Backend())
 	log.Alert("Golang: %v", runtime.Version())
 	log.Alert("OS: %v", runtime.GOOS)
 	log.Alert("Arch: %v", runtime.GOARCH)

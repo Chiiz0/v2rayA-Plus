@@ -164,7 +164,7 @@ func startupFixture(t *testing.T, path string) *bbolt.DB {
 	return database
 }
 
-func runStartupProcess(t *testing.T, dir, mode string) (string, error) {
+func runStartupProcess(t *testing.T, dir, mode string, extraEnv ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -175,6 +175,7 @@ func runStartupProcess(t *testing.T, dir, mode string) (string, error) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "V2RAYA_STARTUP_TEST=1", "V2RAYA_CONFIG="+dir, "V2RAYA_LITE=true", "V2RAYA_NFTABLES_SUPPORT=off", "V2RAYA_LOG_DISABLE_COLOR=true", "V2RAYA_V2RAY_BIN="+filepath.Join(dir, "no-core-binary"))
+	cmd.Env = append(cmd.Env, extraEnv...)
 	if mode == "report" {
 		cmd.Env = append(cmd.Env, "V2RAYA_REPORT=connection")
 	} else if mode == "config-report" {

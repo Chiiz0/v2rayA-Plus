@@ -159,6 +159,19 @@ func Read(path string) (*Archive, error) {
 	if err := decoder.Decode(&archive); err != nil {
 		return nil, fmt.Errorf("invalid backup JSON schema")
 	}
+	// The v1 wire format remains frozen: even an empty v2-only field must not
+	// silently change which documents the original reader accepted.
+	if archive.Version == FormatVersion {
+		var fields struct {
+			Source map[string]json.RawMessage `json:"source"`
+		}
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return nil, fmt.Errorf("invalid backup JSON schema")
+		}
+		if _, exists := fields.Source["digestKind"]; exists {
+			return nil, fmt.Errorf("version 1 backup source cannot contain digestKind")
+		}
+	}
 	if err := Validate(&archive); err != nil {
 		return nil, err
 	}
@@ -222,7 +235,7 @@ func archiveJSONField(name string) bool {
 	// encoding/json otherwise accepts case-insensitive aliases even with
 	// DisallowUnknownFields, including a second spelling of the same field.
 	switch name {
-	case "format", "version", "createdAt", "source", "manifest", "buckets", "backend", "sha256",
+	case "format", "version", "createdAt", "source", "manifest", "buckets", "backend", "sha256", "digestKind",
 		"values", "valueBytes", "logicalSHA256", "name", "sequence", "key", "data":
 		return true
 	default:

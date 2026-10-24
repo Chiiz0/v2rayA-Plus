@@ -65,8 +65,8 @@ SQLite 的价值是按节点读写、可查询的结构和跨对象事务，便�
 
 1. **独立实例锁（已实现）**：在迁移、DNS 恢复、数据库初始化和容器操作前持有配置目录锁，直到核心/DNS 清理和数据库关闭完成。SQLite WAL 允许多进程打开，不能替代目前 Bolt 的独占锁；启动仍以 2 秒超时取得已有源 Bolt 文件锁，识别不认识新锁文件的旧进程。旧进程仍运行时明确失败，不能恢复其 DNS。[启动入口](../service/startup.go)、[锁实现](../service/common/instancelock/lock.go)、[SQLite WAL](https://www.sqlite.org/wal.html)。
 2. **驱动与发行矩阵（已实现）**：采用 `modernc.org/sqlite v1.61.0` / `modernc.org/libc v1.79.0`，实际引擎 `3.54.1`；模块最低 Go 1.26，工具链与 [Dockerfile](../Dockerfile) 固定 `1.26.10`，仍使用 `CGO_ENABLED=0`。升级范围为驱动所需依赖及旧格式化调用兼容修正，现有服务测试、真实 XHTTP 三场景、旧 QUIC TLS 1.3 和 gVisor 内存 TCP 回显已验证。[发行流水线](../.github/workflows/docker-publish.yml) 在发布前运行 Go/race 测试及 amd64/arm64 SQLite 实际运行测试。
-3. 驱动只承诺维护最新版本；没有找到同时支持 Go 1.21 且覆盖所需修复的维护版本，因此升级工具链。所选版本除 SQLite WAL-reset 修复外，还包含近期共享内存映射和等待期间取消处理修复；`sqlite-info` 报告实际版本/source ID。当前冻结候选使用 `DELETE` 日志；未来运行时采用 WAL 时仍需单独测试恢复和备份。其他架构不在本轮发行矩阵内。[驱动变更](https://github.com/modernc-org/sqlite/blob/v1.61.0/CHANGELOG.md)、[维护策略](https://github.com/modernc-org/sqlite/blob/v1.61.0/SECURITY.md)、[SQLite WAL](https://www.sqlite.org/wal.html)。
-4. **明确 schema 版本（候选 v1 已实现）**：SQLite 中保存完整 KV 树、原归档来源、清单和有序 schema 摘要；所有原始字节、未知结构和 uint64 sequence 保留。内部行号仅表达树关系，不是节点身份。运行时实体表、configure API 和 Docker 存储适配仍待下一阶段实现；冻结候选不能作为运行数据库安装。
+3. 驱动只承诺维护最新版本；没有找到同时支持 Go 1.21 且覆盖所需修复的维护版本，因此升级工具链。所选版本除 SQLite WAL-reset 修复外，还包含近期共享内存映射和等待期间取消处理修复；`sqlite-info` 报告实际版本/source ID。当前冻结候选使用 `DELETE` 日志；可选运行时已采用独立 schema 和 WAL，并覆盖恢复与备份测试。其他架构不在本轮发行矩阵内。[驱动变更](https://github.com/modernc-org/sqlite/blob/v1.61.0/CHANGELOG.md)、[维护策略](https://github.com/modernc-org/sqlite/blob/v1.61.0/SECURITY.md)、[SQLite WAL](https://www.sqlite.org/wal.html)。
+4. **明确 schema 版本（候选 v1 已实现）**：SQLite 中保存完整 KV 树、原归档来源、清单和有序 schema 摘要；所有原始字节、未知结构和 uint64 sequence 保留。内部行号仅表达树关系，不是节点身份。运行时现通过统一 Store 接口接入独立可写 KV schema，configure/Docker 路径共用事务契约；未引入上游实体表，冻结候选不能作为运行数据库安装。
 5. **事务和连接池**：离线转换在单事务内创建 schema、写入数据和 ready 清单，读回全部内容才提交；每连接设置并核验 busy timeout、foreign keys、trusted schema 与 CHECK 约束。离线命令只需一条连接。运行时连接池须另行设计，不能直接把上游改为单连接：其订阅查询在外层 rows 未关闭时另查子节点，会阻塞；先合并查询或完成读取再查询。
 6. **离线转换（已实现）**：导入完整归档，锁定候选所在目录，并以有界只读锁识别目录中仍被旧进程占用的 Bolt 文件。在同目录私有临时子目录中转换，验证完整快照、引用目标、`integrity_check`/`foreign_key_check`，以 `DELETE` / `FULL` 完成事务并关闭连接、同步文件后，无覆盖地原子发布。验证 SQLite 时使用安全打开的原文件生成私有只读副本，拒绝任何 WAL/SHM/journal 边文件。前置失败保留源和后端选择；[命令与限制](sqlite-migration.md)。
 7. **崩溃与重试（候选已实现）**：准备数据只存在私有临时目录；全部内容与 ready 清单同事务提交并校验后，以硬链接发布单文件，并同步父目录。同归档重试完整验证数据与来源元数据、补齐目录同步后返回已存在；其他目标拒绝覆盖。已覆盖提交后、同步后、发布后的失败和进程退出，以及磁盘满事务回滚。崩溃遗留临时目录不会被当成已发布候选；没有自动清理未知遗留目录，也没有运行时后端选择文件。
@@ -78,7 +78,7 @@ SQLite 的价值是按节点读写、可查询的结构和跨对象事务，便�
 
 该接口目前只覆盖运行时实际使用的顶层桶操作，不代替完整归档接口。物理文件打开/关闭、实例互斥、报告副本和旧版导入仍由现有生命周期管理。已有故障注入证明 Docker 引用已更新后，后续出站/节点写入失败仍整体回滚；读取不修改事务版本、不创建缺失桶，并可在已有写事务期间读取一致快照。真实归档恢复副本上的应用读取与失败写入验收均保持完整文件字节和逻辑摘要不变，原备份及线上容器未改动。完整 Go、相关 race、XHTTP 实际网络回归通过，发行流水线增加双架构事务契约运行测试。
 
-下一步才接入可写 SQLite 适配器和显式后端选择：冻结候选的原始 manifest/source 不能继续作为运行写入后的清单；须建立独立 runtime schema，并验证 WAL 一致备份、新写入后的反向转换以及现有事务契约。当前没有 SQLite 运行开关，不能把候选文件放到 `bolt.db` 路径启动。
+**可选 SQLite 运行后端已实现**：独立 mutable schema、WAL/FULL、显式选择记录、完整离线迁移、源保持不变的 WAL 快照、备份恢复及新写入后转回新 Bolt，均通过相同 Store 事务边界接入现有 configure/Docker 路径。`--database-backend auto` 默认遵循记录，无记录时保持 Bolt；选择文件损坏/缺失时拒绝启动，不回退。旧冻结候选不能作为运行库。完整命令、重试和旧版本降级步骤见[运行后端文档](sqlite-runtime.md)。
 
 已有真实备份完成了归档 → SQLite → 原归档 → 新 Bolt 验收：6 个桶、12 个值的完整逻辑摘要一致，返回归档与原归档逐字节相同；相同输入重试保持候选 inode/mtime。原备份 23 个文件的摘要和权限、所有者、修改时间不变；本次未停止或重启任何线上容器。真实数据未覆盖订阅与前置链的所有组合，相关结构由测试夹具补充。SQLite v1 尚无实体投影或运行时写入接口，这次验收不代表已完成生产切库或新写入后的回滚。
 

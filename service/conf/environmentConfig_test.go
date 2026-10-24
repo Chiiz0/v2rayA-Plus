@@ -2,6 +2,20 @@ package conf
 
 import "testing"
 
+func TestResolveDatabaseBackend(t *testing.T) {
+	for _, test := range []struct{ input, want string }{
+		{"", "auto"}, {"auto", "auto"}, {" BOLT ", "bolt"}, {"SQLite", "sqlite"},
+	} {
+		got, err := resolveDatabaseBackend(test.input)
+		if err != nil || got != test.want {
+			t.Fatalf("resolveDatabaseBackend(%q) = %q, %v", test.input, got, err)
+		}
+	}
+	if _, err := resolveDatabaseBackend("postgres"); err == nil {
+		t.Fatal("unsupported database backend accepted")
+	}
+}
+
 func TestResolveCoreSelection(t *testing.T) {
 	tests := []struct {
 		name       string

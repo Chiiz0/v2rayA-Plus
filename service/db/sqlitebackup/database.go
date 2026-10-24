@@ -99,6 +99,9 @@ func importCandidate(ctx context.Context, path string, archive *backup.Archive, 
 	if err := backup.Validate(archive); err != nil {
 		return Result{}, fmt.Errorf("invalid source archive: %w", err)
 	}
+	if archive.Format != backup.FormatName || archive.Version != backup.FormatVersion {
+		return Result{}, errors.New("frozen SQLite candidates require an original version 1 Bolt archive")
+	}
 	if backup.Audit(archive).HasErrors() {
 		return Result{}, errors.New("source archive has application-data audit errors")
 	}

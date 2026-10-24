@@ -20,6 +20,9 @@ func Write(ctx context.Context, database *sql.DB, archive *backup.Archive) error
 	if err := backup.Validate(archive); err != nil {
 		return fmt.Errorf("invalid source archive: %w", err)
 	}
+	if archive.Format != backup.FormatName || archive.Version != backup.FormatVersion {
+		return errors.New("frozen SQLite candidates require an original version 1 Bolt archive")
+	}
 	if backup.Audit(archive).HasErrors() {
 		return errors.New("source archive has application-data audit errors")
 	}

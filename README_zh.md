@@ -150,7 +150,11 @@ Docker 代理引用的节点或所属订阅不能直接删除，前置节点同�
 
 ### 离线数据库备份
 
-镜像内提供独立的 `v2raya-db`，支持完整 BoltDB 导出、校验和恢复到新文件，保留账号、Docker 引用、出站设置及未知数据。导出前停止主服务，DNS 恢复文件与 Docker 卷分别保存。操作步骤见[数据库备份与恢复](docs/database-backup.md)。
+镜像内提供独立的 `v2raya-db`，支持完整数据库导出、校验和恢复到新文件，保留账号、Docker 引用、出站设置及未知数据。导出前停止主服务，DNS 恢复文件与 Docker 卷分别保存。操作步骤见[数据库备份与恢复](docs/database-backup.md)。
+
+### 可选 SQLite 运行后端
+
+已有安装默认继续使用 Bolt。`v2raya-db runtime-migrate` 可在停主服务后完整迁移并选择 SQLite，支持 WAL、原子事务、备份恢复及保留新写入的 Bolt 回滚。`runtime-export --config-dir` 始终备份当前选中的数据库；切换后不能再把旧 `bolt.db` 当作最新数据。完整步骤和旧版本降级要求见[SQLite 运行后端](docs/sqlite-runtime.md)。
 
 ### 构建 Docker 镜像
 

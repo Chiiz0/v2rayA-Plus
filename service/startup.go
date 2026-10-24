@@ -34,6 +34,13 @@ func start(config *conf.Params) error {
 			db.SetReadOnly()
 		}
 		defer func() { err = errors.Join(err, db.Close()) }()
+		legacy, err := openLegacyDatabase(config.Config)
+		if err != nil {
+			return err
+		}
+		if legacy != nil {
+			defer func() { err = errors.Join(err, legacy.Close()) }()
+		}
 		// Older releases do not know the directory lock. Keep their Bolt lock
 		// as well, before password reset, module probing or DNS recovery.
 		if err = db.OpenExisting(); err != nil {
@@ -41,13 +48,6 @@ func start(config *conf.Params) error {
 				return fmt.Errorf("database is in use; stop other v2rayA instances, including older versions: %w", err)
 			}
 			return err
-		}
-		legacy, err := openLegacyDatabase(config.Config)
-		if err != nil {
-			return err
-		}
-		if legacy != nil {
-			defer func() { err = errors.Join(err, legacy.Close()) }()
 		}
 		if config.PrintReport != "" {
 			if err = db.Init(); err != nil {
@@ -57,7 +57,9 @@ func start(config *conf.Params) error {
 		if done, err := checkEnvironment(); done || err != nil {
 			return err
 		}
-		initConfigure(legacy)
+		if err = initConfigure(legacy); err != nil {
+			return err
+		}
 		if runtime.GOOS == "linux" {
 			checkTProxySupportability()
 		}

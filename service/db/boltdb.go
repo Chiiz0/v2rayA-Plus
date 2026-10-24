@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/v2rayA/v2rayA/conf"
+	"github.com/v2rayA/v2rayA/db/runtimebackend"
+	"github.com/v2rayA/v2rayA/db/sqlitestore"
 	"github.com/v2rayA/v2rayA/db/store"
 	"go.etcd.io/bbolt"
 )
@@ -20,10 +22,16 @@ var database databaseState
 
 type databaseState struct {
 	handle        *bbolt.DB
+	sqlite        *sqlitestore.Store
+	retired       []*bbolt.DB
 	backend       store.Store
+	selection     runtimebackend.Selection
+	selected      bool
+	sourcePath    string
 	initialized   bool
 	readOnly      bool
 	temporaryPath string
+	temporaryDir  string
 	initErr       error
 }
 
@@ -35,9 +43,9 @@ func SetReadOnly() {
 	database.readOnly = true
 }
 
-// OpenExisting retains the existing database's Bolt lock before startup changes
-// network or configuration state. An absent file is neither created nor marked
-// initialized, so legacy database migration can still run before Init.
+// OpenExisting opens the selected backend and retains compatibility Bolt locks
+// before startup changes network or configuration state. Only an unselected,
+// absent default Bolt file is left uninitialized for legacy migration.
 func OpenExisting() error {
 	databaseMu.Lock()
 	defer databaseMu.Unlock()
@@ -56,15 +64,130 @@ func initDatabaseLocked(existingOnly bool) error {
 	if database.initialized {
 		return database.initErr
 	}
-	path := filepath.Join(conf.GetEnvironmentConfig().Config, "bolt.db")
-	return database.open(path, existingOnly, databaseOpenTimeout)
+	config := conf.GetEnvironmentConfig()
+	return database.openSelected(config.Config, config.DatabaseBackend, existingOnly, databaseOpenTimeout)
 }
 
-func (state *databaseState) open(path string, existingOnly bool, timeout time.Duration) error {
+func (state *databaseState) selectBackend(configDir, expected string) error {
+	if state.selected {
+		return nil
+	}
+	selection, err := runtimebackend.ReadSelection(configDir)
+	if err != nil {
+		return err
+	}
+	if expected != "" && expected != "auto" && expected != selection.Backend {
+		return fmt.Errorf("database backend %q does not match the selected backend %q; use the offline database tool to change backends", expected, selection.Backend)
+	}
+	state.selection = selection
+	state.sourcePath = filepath.Join(configDir, selection.Database)
+	state.selected = true
+	return nil
+}
+
+func (state *databaseState) openSelected(configDir, expected string, existingOnly bool, timeout time.Duration) error {
 	if state.initialized {
 		return state.initErr
 	}
-	if existingOnly {
+	if err := state.selectBackend(configDir, expected); err != nil {
+		state.initialized, state.initErr = true, err
+		return err
+	}
+	// An old binary always opens bolt.db. Hold its shared lock even when the
+	// selected runtime is SQLite or a separately restored Bolt generation.
+	retiredPath := filepath.Join(configDir, "bolt.db")
+	if state.sourcePath != retiredPath && len(state.retired) == 0 {
+		if _, err := os.Lstat(retiredPath); err == nil {
+			handle, err := openReadOnly(retiredPath, timeout)
+			if err != nil {
+				state.initialized = true
+				state.initErr = fmt.Errorf("lock retired Bolt database (stop any older v2rayA instance): %w", err)
+				return state.initErr
+			}
+			state.retired = append(state.retired, handle)
+		} else {
+			state.initialized = true
+			state.initErr = fmt.Errorf("retired Bolt compatibility lock is unavailable; repair the offline backend selection before starting: %w", err)
+			return state.initErr
+		}
+	}
+	if state.selection.Backend == "bolt" {
+		return state.openBolt(state.sourcePath, existingOnly, state.selection.Present, timeout)
+	}
+	state.initialized = true
+	state.initErr = state.openSQLite(state.sourcePath)
+	return state.initErr
+}
+
+func (state *databaseState) openSQLite(path string) (err error) {
+	defer func() {
+		if err != nil && state.temporaryDir != "" {
+			err = errors.Join(err, os.RemoveAll(state.temporaryDir))
+			state.temporaryDir = ""
+		}
+	}()
+	if state.readOnly {
+		archive, err := sqlitestore.SnapshotReadOnly(path)
+		if err != nil {
+			return fmt.Errorf("snapshot report SQLite database: %w", err)
+		}
+		state.temporaryDir, err = os.MkdirTemp("", "v2raya_tmp_sqlite_")
+		if err != nil {
+			return err
+		}
+		path = filepath.Join(state.temporaryDir, "report.sqlite")
+		if err = sqlitestore.Create(path, archive); err != nil {
+			return err
+		}
+	}
+	state.sqlite, err = sqlitestore.Open(path)
+	if err != nil {
+		return err
+	}
+	if err = state.sqlite.Check(); err != nil {
+		closeErr := state.sqlite.Close()
+		state.sqlite = nil
+		return errors.Join(err, closeErr)
+	}
+	state.backend = state.sqlite
+	return nil
+}
+
+// DatabasePath returns the selected source, without creating a database. The
+// selection is cached under the instance lock so initialization uses the same
+// generation that was checked before any network side effects.
+func DatabasePath() (string, error) {
+	databaseMu.Lock()
+	defer databaseMu.Unlock()
+	config := conf.GetEnvironmentConfig()
+	if err := database.selectBackend(config.Config, config.DatabaseBackend); err != nil {
+		return "", err
+	}
+	return database.sourcePath, nil
+}
+
+// Backend is available after OpenExisting or DatabasePath has selected a backend.
+func Backend() string {
+	databaseMu.Lock()
+	defer databaseMu.Unlock()
+	return database.selection.Backend
+}
+
+func DefaultsRequested() bool {
+	databaseMu.Lock()
+	defer databaseMu.Unlock()
+	return database.selection.Initialize
+}
+
+func (state *databaseState) open(path string, existingOnly bool, timeout time.Duration) error {
+	return state.openBolt(path, existingOnly, false, timeout)
+}
+
+func (state *databaseState) openBolt(path string, existingOnly, required bool, timeout time.Duration) error {
+	if state.initialized {
+		return state.initErr
+	}
+	if existingOnly && !required {
 		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			return nil
 		} else if err != nil {
@@ -72,7 +195,7 @@ func (state *databaseState) open(path string, existingOnly bool, timeout time.Du
 		}
 	}
 	state.initialized = true
-	state.handle, state.temporaryPath, state.initErr = openDatabase(path, state.readOnly, !existingOnly, timeout)
+	state.handle, state.temporaryPath, state.initErr = openDatabase(path, state.readOnly, !existingOnly && !required, timeout)
 	if state.initErr == nil {
 		state.backend = store.NewBolt(state.handle)
 	}
@@ -136,12 +259,22 @@ func Close() error {
 
 func (state *databaseState) close() error {
 	var err error
+	if state.sqlite != nil {
+		err = state.sqlite.Close()
+		state.sqlite = nil
+		state.backend = nil
+		state.initErr = bbolt.ErrDatabaseNotOpen
+	}
 	if state.handle != nil {
-		err = state.handle.Close()
+		err = errors.Join(err, state.handle.Close())
 		state.handle = nil
 		state.backend = nil
 		state.initErr = bbolt.ErrDatabaseNotOpen
 	}
+	for _, handle := range state.retired {
+		err = errors.Join(err, handle.Close())
+	}
+	state.retired = nil
 	if state.temporaryPath != "" {
 		removeErr := os.Remove(state.temporaryPath)
 		if errors.Is(removeErr, os.ErrNotExist) {
@@ -150,6 +283,13 @@ func (state *databaseState) close() error {
 		err = errors.Join(err, removeErr)
 		if removeErr == nil {
 			state.temporaryPath = ""
+		}
+	}
+	if state.temporaryDir != "" {
+		removeErr := os.RemoveAll(state.temporaryDir)
+		err = errors.Join(err, removeErr)
+		if removeErr == nil {
+			state.temporaryDir = ""
 		}
 	}
 	return err

@@ -7,6 +7,7 @@ import (
 
 	"github.com/v2rayA/v2rayA/conf"
 	"github.com/v2rayA/v2rayA/db"
+	"github.com/v2rayA/v2rayA/db/runtimebackend"
 	"github.com/v2rayA/v2rayA/db/store"
 )
 
@@ -20,6 +21,14 @@ func TestMain(m *testing.M) {
 	// directory. These tests never read a running installation's database.
 	_ = os.Setenv("V2RAYA_CONFIG", directory)
 	conf.GetEnvironmentConfig().Config = directory
+	if os.Getenv("V2RAYA_TEST_DATABASE_BACKEND") == "sqlite" {
+		if _, err := runtimebackend.InitSQLite(directory); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			_ = os.RemoveAll(directory)
+			os.Exit(1)
+		}
+		conf.GetEnvironmentConfig().DatabaseBackend = "sqlite"
+	}
 	if err := db.Init(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		_ = os.RemoveAll(directory)

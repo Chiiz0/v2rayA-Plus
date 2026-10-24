@@ -1,4 +1,4 @@
-// Package backup preserves complete Bolt databases without importing application
+// Package backup preserves complete database trees without importing application
 // configuration, opening a default database, or changing runtime state.
 package backup
 
@@ -15,12 +15,15 @@ import (
 )
 
 const (
-	FormatName      = "v2raya-bolt-backup"
-	FormatVersion   = 1
-	MaxDepth        = 64
-	MaxEntries      = 100000
-	MaxDataBytes    = 128 << 20
-	MaxArchiveBytes = 256 << 20
+	FormatName            = "v2raya-bolt-backup"
+	FormatVersion         = 1
+	SnapshotFormatName    = "v2raya-database-backup"
+	SnapshotFormatVersion = 2
+	LogicalDigestKind     = "logical-sha256"
+	MaxDepth              = 64
+	MaxEntries            = 100000
+	MaxDataBytes          = 128 << 20
+	MaxArchiveBytes       = 256 << 20
 )
 
 type Archive struct {
@@ -33,8 +36,9 @@ type Archive struct {
 }
 
 type Source struct {
-	Backend string `json:"backend"`
-	SHA256  string `json:"sha256"`
+	Backend    string `json:"backend"`
+	SHA256     string `json:"sha256"`
+	DigestKind string `json:"digestKind,omitempty"`
 }
 
 type Manifest struct {
@@ -63,13 +67,17 @@ func Validate(archive *Archive) error {
 	if archive == nil {
 		return fmt.Errorf("backup archive is nil")
 	}
-	if archive.Format != FormatName || archive.Version != FormatVersion {
+	legacy := archive.Format == FormatName && archive.Version == FormatVersion
+	snapshot := archive.Format == SnapshotFormatName && archive.Version == SnapshotFormatVersion
+	if !legacy && !snapshot {
 		return fmt.Errorf("unsupported backup format or version")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, archive.CreatedAt); err != nil {
 		return fmt.Errorf("invalid backup creation time")
 	}
-	if archive.Source.Backend != "bbolt" || !validDigest(archive.Source.SHA256) {
+	if !validDigest(archive.Source.SHA256) ||
+		legacy && (archive.Source.Backend != "bbolt" || archive.Source.DigestKind != "") ||
+		snapshot && (archive.Source.Backend != "bbolt" && archive.Source.Backend != "sqlite" || archive.Source.DigestKind != LogicalDigestKind) {
 		return fmt.Errorf("invalid backup source metadata")
 	}
 	manifest, err := manifestFor(archive.Buckets)
@@ -78,6 +86,9 @@ func Validate(archive *Archive) error {
 	}
 	if archive.Manifest != manifest {
 		return fmt.Errorf("backup manifest or logical checksum does not match its contents")
+	}
+	if snapshot && archive.Source.SHA256 != manifest.LogicalSHA256 {
+		return fmt.Errorf("backup logical source checksum does not match its contents")
 	}
 	return nil
 }

@@ -39,8 +39,18 @@ jobs:
           cache-dependency-path: service/go.sum
       - name: Service regression tests
         run: CGO_ENABLED=0 go test ./...
+      - name: Service regression tests with SQLite runtime
+        run: CGO_ENABLED=0 V2RAYA_TEST_DATABASE_BACKEND=sqlite go test ./server/service
       - name: Database race tests
         run: go test -race ./common/instancelock ./db/... ./cmd/v2raya-db ./server/service
+      - name: SQLite service race tests
+        run: V2RAYA_TEST_DATABASE_BACKEND=sqlite go test -race ./server/service
+      - name: Isolated service HTTP persistence and rollback
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/v2raya-runtime" .
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/v2raya-runtime-db" ./cmd/v2raya-db
+          docker pull alpine:3.23
+          python3 ../scripts/test-sqlite-runtime.py --service "$RUNNER_TEMP/v2raya-runtime" --db "$RUNNER_TEMP/v2raya-runtime-db"
       - uses: docker/setup-qemu-action@v3
       - name: Run static database binaries on both release architectures
         shell: bash
@@ -49,6 +59,8 @@ jobs:
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -o "$RUNNER_TEMP/v2raya-db-$arch" ./cmd/v2raya-db
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/sqlitebackup-$arch.test" ./db/sqlitebackup
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/store-$arch.test" ./db/store
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/sqlitestore-$arch.test" ./db/sqlitestore
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/runtimebackend-$arch.test" ./db/runtimebackend
             docker run --rm --platform "linux/$arch" --network none --read-only \
               --mount "type=bind,src=$RUNNER_TEMP/v2raya-db-$arch,dst=/v2raya-db,readonly" \
               --entrypoint /v2raya-db alpine:3.23 sqlite-info
@@ -58,6 +70,12 @@ jobs:
             docker run --rm --platform "linux/$arch" --network none --read-only --tmpfs /tmp:rw,mode=1777 \
               --mount "type=bind,src=$RUNNER_TEMP/store-$arch.test,dst=/store.test,readonly" \
               --entrypoint /store.test alpine:3.23 -test.v -test.timeout=5m
+            docker run --rm --platform "linux/$arch" --network none --read-only --tmpfs /tmp:rw,mode=1777 \
+              --mount "type=bind,src=$RUNNER_TEMP/sqlitestore-$arch.test,dst=/sqlitestore.test,readonly" \
+              --entrypoint /sqlitestore.test alpine:3.23 -test.v -test.timeout=5m
+            docker run --rm --platform "linux/$arch" --network none --read-only --tmpfs /tmp:rw,mode=1777 \
+              --mount "type=bind,src=$RUNNER_TEMP/runtimebackend-$arch.test,dst=/runtimebackend.test,readonly" \
+              --entrypoint /runtimebackend.test alpine:3.23 -test.v -test.timeout=5m
           done
 
   build-and-push:

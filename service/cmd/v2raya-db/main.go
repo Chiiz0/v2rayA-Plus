@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/v2rayA/v2rayA/db/backup"
+	"github.com/v2rayA/v2rayA/db/runtimebackend"
 	"github.com/v2rayA/v2rayA/db/sqlitebackup"
 )
 
@@ -27,10 +29,16 @@ const usage = `Usage:
   v2raya-db sqlite-verify --db SQLITE [--in ARCHIVE]
   v2raya-db sqlite-export --db SQLITE --out ARCHIVE
   v2raya-db sqlite-info
+  v2raya-db runtime-migrate --config-dir DIRECTORY
+  v2raya-db runtime-init --config-dir EMPTY_DIRECTORY
+  v2raya-db runtime-restore --config-dir EMPTY_DIRECTORY --in ARCHIVE
+  v2raya-db runtime-rollback --config-dir DIRECTORY
+  v2raya-db runtime-export --config-dir DIRECTORY --out ARCHIVE
+  v2raya-db runtime-verify --config-dir DIRECTORY
 
 This tool supports Linux. Use a stopped installation or a consistent offline copy.
-Existing output files
-are never overwritten. Database archives contain credentials and are written
+Archive output files and restore destinations are never overwritten.
+Database archives contain credentials and are written
 with mode 0600. DNS recovery files and Docker volumes are separate from the
 database archive. The dns-backup command copies recovery data without applying it.
 
@@ -38,11 +46,19 @@ verify --db compares every stored byte and bucket sequence with the archive.
 verify --docker explicitly enables read-only Docker metadata checks; it does not
 validate protocol settings inside container volumes or recreate containers.
 
-SQLite commands operate on frozen, complete KV-tree migration candidates,
+sqlite-import, sqlite-verify and sqlite-export operate on frozen KV-tree candidates,
 not runtime databases. They do not switch the backend or start any service.
 sqlite-import accepts an existing destination only after verifying that its
 contents and original archive metadata are identical. Other output files must
 be new. sqlite-export preserves the original Bolt archive provenance.
+
+runtime-* commands operate on the explicitly selected configuration directory.
+Stop its service first: every management operation requires the instance lock.
+runtime-migrate activates SQLite from Bolt; runtime-init creates an empty SQLite
+installation; runtime-restore activates a full archive in an empty installation.
+runtime-rollback preserves current SQLite data in a newly selected Bolt database.
+No command starts services, applies DNS recovery data or recreates Docker resources.
+runtime-export creates an offline logical snapshot, separate from frozen candidates.
 
 Exit codes: 0 success, 1 operational failure, 2 invalid arguments or audit failure.
 An export with audit failures still saves all original bytes for recovery.
@@ -120,6 +136,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		flags.StringVar(&database, "db", "", "offline SQLite migration candidate")
 		flags.StringVar(&output, "out", "", "new archive file preserving original provenance")
 	case "sqlite-info":
+	case "runtime-migrate", "runtime-init", "runtime-rollback", "runtime-verify":
+		flags.StringVar(&directory, "config-dir", "", "explicit offline installation directory; stop its service first")
+	case "runtime-export":
+		flags.StringVar(&directory, "config-dir", "", "explicit offline installation directory; stop its service first")
+		flags.StringVar(&output, "out", "", "new full runtime archive file")
+	case "runtime-restore":
+		flags.StringVar(&directory, "config-dir", "", "empty installation directory for SQLite activation")
+		flags.StringVar(&input, "in", "", "full archive to restore into the new SQLite installation")
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n%s", operation, usage)
 		return 2
@@ -137,7 +161,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		operation == "dns-backup" && (directory == "" || output == "") ||
 		operation == "sqlite-import" && (input == "" || database == "") ||
 		operation == "sqlite-verify" && database == "" ||
-		operation == "sqlite-export" && (database == "" || output == "") {
+		operation == "sqlite-export" && (database == "" || output == "") ||
+		isRuntimeOperation(operation) && directory == "" ||
+		operation == "runtime-export" && output == "" ||
+		operation == "runtime-restore" && input == "" {
 		fmt.Fprint(stderr, "all paths must be provided explicitly\n", usage)
 		return 2
 	}
@@ -150,6 +177,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	emit := func(report commandReport) int {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			return fail(err)
+		}
+		if !report.Success {
+			return 2
+		}
+		return 0
+	}
+	if isRuntimeOperation(operation) {
+		report, err := runRuntime(operation, directory, input, output)
+		if err != nil {
+			if errors.Is(err, runtimebackend.ErrAudit) {
+				fmt.Fprintf(stderr, "v2raya-db: %v\n", err)
+				return 2
+			}
+			return fail(err)
+		}
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
@@ -266,7 +312,7 @@ func runSQLite(ctx context.Context, operation, input, output, database string) (
 			return report, err
 		}
 		report.Engine, report.Build = &engine, currentBuildInformation()
-		report.Notes = []string{"SQLite support is for frozen migration candidates; the running service continues to use BoltDB."}
+		report.Notes = []string{"The linked SQLite engine supports separate frozen-candidate and optional runtime formats; no installation was opened or changed."}
 		return report, nil
 	}
 	var archive *backup.Archive
@@ -276,6 +322,9 @@ func runSQLite(ctx context.Context, operation, input, output, database string) (
 		archive, err = backup.Read(input)
 		if err != nil {
 			return report, err
+		}
+		if archive.Format != backup.FormatName || archive.Version != backup.FormatVersion {
+			return report, fmt.Errorf("frozen SQLite candidates require an original version 1 Bolt archive; use runtime-restore for a new runtime installation")
 		}
 		report.Archive, report.Manifest = input, &archive.Manifest
 		audit := backup.Audit(archive)
