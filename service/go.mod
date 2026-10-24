@@ -1,6 +1,8 @@
 module github.com/v2rayA/v2rayA
 
-go 1.21.0
+go 1.26.0
+
+toolchain go1.26.10
 
 require (
 	github.com/daeuniverse/outbound v0.0.0-20230819151251-3ce60883d337
@@ -41,10 +43,12 @@ require (
 	github.com/v2rayA/v2rayA-lib4 v0.0.0-20230812094818-595f87cb2a49
 	github.com/vearutop/statigz v1.1.7
 	go.etcd.io/bbolt v1.3.8
-	golang.org/x/net v0.33.0
-	golang.org/x/sys v0.28.0
+	golang.org/x/mod v0.42.0
+	golang.org/x/net v0.61.0
+	golang.org/x/sys v0.49.0
 	google.golang.org/grpc v1.57.1
 	google.golang.org/protobuf v1.33.0
+	modernc.org/sqlite v1.61.0
 )
 
 require (
@@ -55,6 +59,7 @@ require (
 	github.com/dgryski/go-idea v0.0.0-20170306091226-d2fb45a411fb // indirect
 	github.com/dgryski/go-rc2 v0.0.0-20150621095337-8a9021637152 // indirect
 	github.com/djherbis/times v1.5.0 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/eknkc/basex v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
@@ -68,21 +73,23 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/btree v1.1.2 // indirect
-	github.com/google/pprof v0.0.0-20230705174524-200ffdc848b8 // indirect
-	github.com/google/uuid v1.3.0 // indirect
+	github.com/google/pprof v0.0.0-20261016150608-1facf8f91b50 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/mzz2017/disk-bloom v1.0.1 // indirect
 	github.com/mzz2017/quic-go v0.0.0-20230902042923-a727c1c479d4 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/onsi/ginkgo/v2 v2.11.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.1 // indirect
 	github.com/pires/go-proxyproto v0.7.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.3 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
 	github.com/sagernet/go-tun2socks v1.16.12-0.20220818015926-16cb67876a61 // indirect
 	github.com/sagernet/netlink v0.0.0-20220905062125-8043b4a9aa97 // indirect
@@ -97,16 +104,18 @@ require (
 	gitlab.com/yawning/chacha20.git v0.0.0-20230427033715-7877545b1b37 // indirect
 	go4.org/netipx v0.0.0-20230728184502-ec4c8b891b28 // indirect
 	golang.org/x/arch v0.7.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df // indirect
-	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
-	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
+	golang.org/x/tools v0.52.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230807174057-1744710a1577 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	modernc.org/libc v1.79.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )
 
 // Replace dependency modules with local developing copy

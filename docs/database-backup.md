@@ -1,6 +1,6 @@
 # 离线数据库备份与恢复
 
-`v2raya-db` 是独立的 Linux 命令，随 amd64/arm64 Docker 镜像提供。它不加载主服务配置，不启动核心、修改 DNS 或重建容器。当前支持 BoltDB；本工具提供后续 SQLite 迁移需要的完整数据契约，尚未切换运行后端。
+`v2raya-db` 是独立的 Linux 命令，随 amd64/arm64 Docker 镜像提供。它不加载主服务配置，不启动核心、修改 DNS 或重建容器。运行后端仍为 BoltDB；完整归档也可用于[SQLite 离线迁移候选](sqlite-migration.md)的导入、验证和往返导出，不会切换后端。
 
 ## 备份范围
 
@@ -106,7 +106,7 @@ docker run --rm -i --network none --read-only \
 
 ## 本地开发与验证
 
-在 Linux 上，可使用项目的 Go 1.21 工具链构建独立命令：
+在 Linux 上，使用符合 `service/go.mod` 的 Go 工具链构建独立命令：
 
 ```bash
 cd service

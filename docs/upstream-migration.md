@@ -1,6 +1,6 @@
 # 上游功能与存储迁移路线
 
-评估基线：本地 `d1b0081e`，上游 `1ee48148`。采用分阶段落地：先 XHTTP，再迁移数据库和界面。阶段 1（XHTTP）与阶段 2（Docker 引用一致性）已实现；阶段 3 已交付完整离线数据库工具，并完成一次真实部署的数据库与外部卷恢复验收；阶段 4 已实现独立实例锁。当前运行库仍为 BoltDB，下一项是 SQLite 驱动与离线转换验证。
+评估基线：本地 `b9b20616`，上游 `1ee48148`。采用分阶段落地：先 XHTTP，再迁移数据库和界面。阶段 1（XHTTP）与阶段 2（Docker 引用一致性）已实现；阶段 3 已交付完整离线数据库工具，并完成一次真实部署的数据库与外部卷恢复验收；阶段 4 已实现独立实例锁、SQLite 冻结候选转换和真实备份往返验收。当前运行库仍为 BoltDB，下一项是运行时 schema 与可选后端适配。
 
 ## 目标与收益
 
@@ -64,15 +64,17 @@ SQLite 的价值是按节点读写、可查询的结构和跨对象事务，便�
 ## 阶段 4：SQLite 运行基础与离线迁移
 
 1. **独立实例锁（已实现）**：在迁移、DNS 恢复、数据库初始化和容器操作前持有配置目录锁，直到核心/DNS 清理和数据库关闭完成。SQLite WAL 允许多进程打开，不能替代目前 Bolt 的独占锁；启动仍以 2 秒超时取得已有源 Bolt 文件锁，识别不认识新锁文件的旧进程。旧进程仍运行时明确失败，不能恢复其 DNS。[启动入口](../service/startup.go)、[锁实现](../service/common/instancelock/lock.go)、[SQLite WAL](https://www.sqlite.org/wal.html)。
-2. **驱动与发行矩阵**：本地模块声明 Go 1.21，[Dockerfile](../Dockerfile) 使用 `CGO_ENABLED=0`，[发行流水线](../.github/workflows/docker-publish.yml) 为 Linux amd64/arm64。选择驱动后分别验证编译、运行与 `SELECT sqlite_version()`；Go 工具链升级须单独验证现有网络依赖，不整体复制上游 Go 1.26 依赖集。
-3. 上游锁定的 `modernc.org/sqlite v1.29.5` 内嵌 SQLite 3.45.1；迁移采用包含 WAL-reset 修复的引擎（3.51.3+，或已确认的补丁分支），并验证实际二进制版本。MIPS/Loong64 上游依赖 CGO 驱动，不应因此破坏现有无 CGO 的 amd64/arm64 发行；其他架构作为独立构建目标验证。[驱动版本](https://gitlab.com/cznic/sqlite/-/raw/v1.29.5/doc.go)、[官方修复说明](https://www.sqlite.org/wal.html#walreset)。
-4. **明确 schema 版本**：建立有序 migration 记录；保留现有 configure API，单独适配 Docker 存储。第一版保留节点原始 JSON 与位置语义，避免同时引入 DNS、新 UI、账号算法和稳定 ID 的数据变更。添加实际查询需要的索引；不得把位置当 SQL 自增主键。
-5. **事务和连接池**：每连接应用 busy timeout/foreign keys；多对象更新使用同一事务。WAL 仍只有一个 writer，写冲突须有明确策略。不能直接把上游连接池改为单连接：其订阅查询在外层 rows 未关闭时另查子节点，会阻塞；先合并查询或完成读取再查询。
-6. **离线转换**：锁定配置目录，读取完整 Bolt 快照，在同目录临时 SQLite 文件中以单事务转换全部数据；验证完整快照、引用目标、`integrity_check`/`foreign_key_check`，关闭并完成 checkpoint、同步文件后再原子发布。任何前置失败都保留源文件及原后端选择。
-7. **崩溃与重试**：使用含源摘要、目标摘要、schema 版本与迁移状态的清单，明确“准备/发布/完成”状态；文件及目录同步。两库并存时根据清单判定，不以“有一条 system 记录”猜测迁移完成；不覆盖已有备份，重复执行必须幂等。
+2. **驱动与发行矩阵（已实现）**：采用 `modernc.org/sqlite v1.61.0` / `modernc.org/libc v1.79.0`，实际引擎 `3.54.1`；模块最低 Go 1.26，工具链与 [Dockerfile](../Dockerfile) 固定 `1.26.10`，仍使用 `CGO_ENABLED=0`。升级范围为驱动所需依赖及旧格式化调用兼容修正，现有服务测试、真实 XHTTP 三场景、旧 QUIC TLS 1.3 和 gVisor 内存 TCP 回显已验证。[发行流水线](../.github/workflows/docker-publish.yml) 在发布前运行 Go/race 测试及 amd64/arm64 SQLite 实际运行测试。
+3. 驱动只承诺维护最新版本；没有找到同时支持 Go 1.21 且覆盖所需修复的维护版本，因此升级工具链。所选版本除 SQLite WAL-reset 修复外，还包含近期共享内存映射和等待期间取消处理修复；`sqlite-info` 报告实际版本/source ID。当前冻结候选使用 `DELETE` 日志；未来运行时采用 WAL 时仍需单独测试恢复和备份。其他架构不在本轮发行矩阵内。[驱动变更](https://github.com/modernc-org/sqlite/blob/v1.61.0/CHANGELOG.md)、[维护策略](https://github.com/modernc-org/sqlite/blob/v1.61.0/SECURITY.md)、[SQLite WAL](https://www.sqlite.org/wal.html)。
+4. **明确 schema 版本（候选 v1 已实现）**：SQLite 中保存完整 KV 树、原归档来源、清单和有序 schema 摘要；所有原始字节、未知结构和 uint64 sequence 保留。内部行号仅表达树关系，不是节点身份。运行时实体表、configure API 和 Docker 存储适配仍待下一阶段实现；冻结候选不能作为运行数据库安装。
+5. **事务和连接池**：离线转换在单事务内创建 schema、写入数据和 ready 清单，读回全部内容才提交；每连接设置并核验 busy timeout、foreign keys、trusted schema 与 CHECK 约束。离线命令只需一条连接。运行时连接池须另行设计，不能直接把上游改为单连接：其订阅查询在外层 rows 未关闭时另查子节点，会阻塞；先合并查询或完成读取再查询。
+6. **离线转换（已实现）**：导入完整归档，锁定候选所在目录，并以有界只读锁识别目录中仍被旧进程占用的 Bolt 文件。在同目录私有临时子目录中转换，验证完整快照、引用目标、`integrity_check`/`foreign_key_check`，以 `DELETE` / `FULL` 完成事务并关闭连接、同步文件后，无覆盖地原子发布。验证 SQLite 时使用安全打开的原文件生成私有只读副本，拒绝任何 WAL/SHM/journal 边文件。前置失败保留源和后端选择；[命令与限制](sqlite-migration.md)。
+7. **崩溃与重试（候选已实现）**：准备数据只存在私有临时目录；全部内容与 ready 清单同事务提交并校验后，以硬链接发布单文件，并同步父目录。同归档重试完整验证数据与来源元数据、补齐目录同步后返回已存在；其他目标拒绝覆盖。已覆盖提交后、同步后、发布后的失败和进程退出，以及磁盘满事务回滚。崩溃遗留临时目录不会被当成已发布候选；没有自动清理未知遗留目录，也没有运行时后端选择文件。
 8. **备份与回滚**：在线 SQLite 用 backup API 或 `VACUUM INTO`，不能只复制 `.db` 忽略 WAL。发布前保留完整 Bolt 快照；试运行未产生新写入时可切回该快照；产生新写入后须先导出当前逻辑数据并验证反向转换，不能拿旧快照冒充无损回滚。[官方备份方法](https://www.sqlite.org/backup.html)。
 
 本阶段交付依次为：离线迁移命令和报告 → 测试目录/副本上的可选 SQLite 运行 → 备份恢复与回滚演练 → 默认切换。每次只保留一个权威写入后端，不双写。
+
+已有真实备份完成了归档 → SQLite → 原归档 → 新 Bolt 验收：6 个桶、12 个值的完整逻辑摘要一致，返回归档与原归档逐字节相同；相同输入重试保持候选 inode/mtime。原备份 23 个文件的摘要和权限、所有者、修改时间不变；本次未停止或重启任何线上容器。真实数据未覆盖订阅与前置链的所有组合，相关结构由测试夹具补充。SQLite v1 尚无实体投影或运行时写入接口，这次验收不代表已完成生产切库或新写入后的回滚。
 
 实例锁文件为 `.v2raya-instance.lock`，退出后保留，不能用删除文件的方式“解锁”；操作系统在关闭句柄或进程退出时释放锁。Linux/macOS/BSD 使用 `flock`，Windows 使用 `LockFileEx`；配置目录软链接别名共享锁，锁文件本身不允许软链接。已覆盖 Linux 跨进程竞争、异常退出、正常清理、旧 Bolt/v4 进程竞争、报告与重置密码入口；其他平台完成包级交叉编译，仍待实机运行验收。配置参数解析、目录创建和日志初始化可能发生在取得锁之前，但不会因此恢复 DNS 或启动内核。
 

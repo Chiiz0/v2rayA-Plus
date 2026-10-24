@@ -23,7 +23,7 @@ RUN echo "network-timeout 600000" >> .yarnrc
 #RUN yarn config set sass_binary_site https://cdn.npm.taobao.org/dist/node-sass -g
 RUN yarn cache clean && yarn install --ignore-engines && yarn build
 
-FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ADD service /build/service

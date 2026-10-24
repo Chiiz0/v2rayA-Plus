@@ -13,7 +13,51 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build embedded web assets and test node editor
+        working-directory: gui
+        run: |
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
+          yarn install --frozen-lockfile --ignore-engines
+          yarn test:node-editor
+          OUTPUT_DIR=../service/server/router/web yarn build
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: service/go.sum
+      - name: Service regression tests
+        run: CGO_ENABLED=0 go test ./...
+      - name: Database race tests
+        run: go test -race ./common/instancelock ./db/backup ./db/sqlitebackup ./cmd/v2raya-db
+      - uses: docker/setup-qemu-action@v3
+      - name: Run static SQLite binaries on both release architectures
+        shell: bash
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -o "$RUNNER_TEMP/v2raya-db-$arch" ./cmd/v2raya-db
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/sqlitebackup-$arch.test" ./db/sqlitebackup
+            docker run --rm --platform "linux/$arch" --network none --read-only \
+              --mount "type=bind,src=$RUNNER_TEMP/v2raya-db-$arch,dst=/v2raya-db,readonly" \
+              --entrypoint /v2raya-db alpine:3.23 sqlite-info
+            docker run --rm --platform "linux/$arch" --network none --read-only --tmpfs /tmp:rw,mode=1777 \
+              --mount "type=bind,src=$RUNNER_TEMP/sqlitebackup-$arch.test,dst=/sqlitebackup.test,readonly" \
+              --entrypoint /sqlitebackup.test alpine:3.23 -test.v -test.timeout=5m
+          done
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

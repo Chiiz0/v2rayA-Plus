@@ -301,10 +301,10 @@ func (s *Socks5) connect(conn net.Conn, target string) error {
 		return fmt.Errorf("proxy: failed to read greeting from SOCKS5 proxy at %v: %w", s.addr, err)
 	}
 	if buf[0] != Version {
-		return fmt.Errorf("proxy: SOCKS5 proxy at " + s.addr + " has unexpected version " + strconv.Itoa(int(buf[0])))
+		return fmt.Errorf("proxy: SOCKS5 proxy at %s has unexpected version %d", s.addr, buf[0])
 	}
 	if buf[1] == 0xff {
-		return fmt.Errorf("proxy: SOCKS5 proxy at " + s.addr + " requires authentication")
+		return fmt.Errorf("proxy: SOCKS5 proxy at %s requires authentication", s.addr)
 	}
 
 	if buf[1] == socks.AuthPassword {
@@ -324,7 +324,7 @@ func (s *Socks5) connect(conn net.Conn, target string) error {
 		}
 
 		if buf[1] != 0 {
-			return fmt.Errorf("proxy: SOCKS5 proxy at " + s.addr + " rejected username/password")
+			return fmt.Errorf("proxy: SOCKS5 proxy at %s rejected username/password", s.addr)
 		}
 	}
 
@@ -341,7 +341,7 @@ func (s *Socks5) connect(conn net.Conn, target string) error {
 		buf = append(buf, ip...)
 	} else {
 		if len(host) > 255 {
-			return fmt.Errorf("proxy: destination hostname too long: " + host)
+			return fmt.Errorf("proxy: destination hostname too long: %s", host)
 		}
 		buf = append(buf, socks.ATypDomain)
 		buf = append(buf, byte(len(host)))
@@ -363,7 +363,7 @@ func (s *Socks5) connect(conn net.Conn, target string) error {
 	}
 
 	if len(failure) > 0 {
-		return fmt.Errorf("proxy: SOCKS5 proxy at " + s.addr + " failed to connect: " + failure)
+		return fmt.Errorf("proxy: SOCKS5 proxy at %s failed to connect: %s", s.addr, failure)
 	}
 
 	bytesToDiscard := 0
@@ -461,7 +461,7 @@ func (s *Socks5) handshake(rw io.ReadWriter) (socks.Addr, error) {
 			if err != nil {
 				return nil, err
 			}
-			return nil, fmt.Errorf("auth failed, authinfo: " + user + ":" + pass)
+			return nil, fmt.Errorf("auth failed: invalid username or password")
 		}
 
 		// Response auth state

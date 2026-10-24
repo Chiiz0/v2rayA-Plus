@@ -51,5 +51,5 @@ func DialerFromURL(s string, dialer Dialer) (Dialer, error) {
 		return c(s, dialer)
 	}
 
-	return nil, fmt.Errorf("unknown scheme '" + u.Scheme + "'")
+	return nil, fmt.Errorf("unknown scheme '%s'", u.Scheme)
 }

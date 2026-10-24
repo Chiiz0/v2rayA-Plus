@@ -175,7 +175,7 @@ func CheckAndUpdateGFWList(downloadLink string) (localGFWListVersionAfterUpdate 
 		}
 		if update {
 			return "", fmt.Errorf(
-				"latest version is " + tRemote.Local().Format("2006-01-02") + ". GFWList is up to date",
+				"latest version is %s. GFWList is up to date", tRemote.Local().Format("2006-01-02"),
 			)
 		}
 

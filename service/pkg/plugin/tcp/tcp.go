@@ -160,7 +160,7 @@ func (s *Tcp) Dial(network, addr string) (net.Conn, error) {
 	switch network {
 	case "tcp", "tcp6", "tcp4":
 	default:
-		return nil, fmt.Errorf("[tcp]: no support for connection type " + network)
+		return nil, fmt.Errorf("[tcp]: no support for connection type %s", network)
 	}
 
 	c, err := s.dialer.Dial(network, s.listenAddr)

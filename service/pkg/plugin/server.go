@@ -50,5 +50,5 @@ func ServerFromURL(s string, p Proxy) (Server, error) {
 		return c(s, p)
 	}
 
-	return nil, fmt.Errorf("unknown scheme '" + u.Scheme + "'")
+	return nil, fmt.Errorf("unknown scheme '%s'", u.Scheme)
 }
