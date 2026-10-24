@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"go.etcd.io/bbolt"
-
 	"github.com/v2rayA/v2rayA/db"
+	"github.com/v2rayA/v2rayA/db/store"
 )
 
 type DockerProxyCore string
@@ -29,13 +28,17 @@ type DockerProxy struct {
 }
 
 func GetDockerProxies() ([]DockerProxy, error) {
+	database, err := db.CurrentStore()
+	if err != nil {
+		return nil, err
+	}
+	return getDockerProxies(database)
+}
+
+func getDockerProxies(database store.Store) ([]DockerProxy, error) {
 	var list []DockerProxy
-	err := db.DB().View(func(tx *bbolt.Tx) error {
-		bkt := tx.Bucket([]byte("dockerProxies"))
-		if bkt == nil {
-			return nil
-		}
-		return bkt.ForEach(func(k, v []byte) error {
+	err := database.View(func(tx store.ReadTx) error {
+		return tx.ForEach([]byte("dockerProxies"), func(k, v []byte) error {
 			dp, err := decodeDockerProxy(k, v)
 			if err != nil {
 				return err
@@ -51,25 +54,33 @@ func GetDockerProxies() ([]DockerProxy, error) {
 }
 
 func SaveDockerProxy(dp DockerProxy) error {
+	database, err := db.CurrentStore()
+	if err != nil {
+		return err
+	}
+	return saveDockerProxy(database, dp)
+}
+
+func saveDockerProxy(database store.Store, dp DockerProxy) error {
 	b, err := json.Marshal(dp)
 	if err != nil {
 		return err
 	}
-	return db.DB().Update(func(tx *bbolt.Tx) error {
-		bkt, err := tx.CreateBucketIfNotExists([]byte("dockerProxies"))
-		if err != nil {
-			return err
-		}
-		return bkt.Put([]byte(strconv.Itoa(dp.Port)), b)
+	return database.Update(func(tx store.WriteTx) error {
+		return tx.Put([]byte("dockerProxies"), []byte(strconv.Itoa(dp.Port)), b)
 	})
 }
 
 func RemoveDockerProxy(port int) error {
-	return db.DB().Update(func(tx *bbolt.Tx) error {
-		bkt := tx.Bucket([]byte("dockerProxies"))
-		if bkt == nil {
-			return nil
-		}
-		return bkt.Delete([]byte(strconv.Itoa(port)))
+	database, err := db.CurrentStore()
+	if err != nil {
+		return err
+	}
+	return removeDockerProxy(database, port)
+}
+
+func removeDockerProxy(database store.Store, port int) error {
+	return database.Update(func(tx store.WriteTx) error {
+		return tx.Delete([]byte("dockerProxies"), []byte(strconv.Itoa(port)))
 	})
 }

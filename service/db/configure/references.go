@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/v2rayA/v2rayA/db"
-	"go.etcd.io/bbolt"
+	"github.com/v2rayA/v2rayA/db/store"
 )
 
 var ErrSubscriptionChanged = errors.New("subscription changed while downloading; retry the refresh")
@@ -54,15 +54,19 @@ func decodeReferenceServerRaw(raw []byte) (*ServerRaw, error) {
 	return Bytes2ServerRaw(raw)
 }
 
-func loadReferenceTouches(tx *bbolt.Tx) (state referenceTouches, err error) {
-	bucket := tx.Bucket([]byte("touch"))
-	if bucket == nil {
-		return state, nil
+func readReferenceListInTx(tx store.ReadTx, bucket, key, label string) ([]json.RawMessage, error) {
+	raw, err := tx.Get([]byte(bucket), []byte(key))
+	if err != nil {
+		return nil, err
 	}
-	if state.servers, err = readReferenceList(bucket.Get([]byte("servers")), "servers"); err != nil {
+	return readReferenceList(raw, label)
+}
+
+func loadReferenceTouches(tx store.ReadTx) (state referenceTouches, err error) {
+	if state.servers, err = readReferenceListInTx(tx, "touch", "servers", "servers"); err != nil {
 		return state, err
 	}
-	if state.subscriptions, err = readReferenceList(bucket.Get([]byte("subscriptions")), "subscriptions"); err != nil {
+	if state.subscriptions, err = readReferenceListInTx(tx, "touch", "subscriptions", "subscriptions"); err != nil {
 		return state, err
 	}
 	for _, raw := range state.subscriptions {
@@ -178,26 +182,28 @@ func mergeUnknownReferenceFields(normalized, original referenceObject, typ refle
 
 type referenceRemap func(Which, bool) (Which, bool, error)
 
-func referenceOutboundNames(tx *bbolt.Tx, includeOrphans bool) ([]string, error) {
+func referenceOutboundNames(tx store.ReadTx, includeOrphans bool) ([]string, error) {
 	// Decode the real gob set; scanning printable bytes corrupts short/Unicode names.
 	names := map[string]bool{"outbound.proxy": true}
-	if bucket := tx.Bucket([]byte("outbounds")); bucket != nil {
-		if raw := bucket.Get([]byte("names")); raw != nil {
-			var set map[[32]byte]interface{}
-			if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&set); err != nil {
-				return nil, fmt.Errorf("invalid outbound names set")
+	raw, err := tx.Get([]byte("outbounds"), []byte("names"))
+	if err != nil {
+		return nil, err
+	}
+	if raw != nil {
+		var set map[[32]byte]interface{}
+		if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&set); err != nil {
+			return nil, fmt.Errorf("invalid outbound names set")
+		}
+		for _, value := range set {
+			name, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid outbound name")
 			}
-			for _, value := range set {
-				name, ok := value.(string)
-				if !ok {
-					return nil, fmt.Errorf("invalid outbound name")
-				}
-				names["outbound."+name] = true
-			}
+			names["outbound."+name] = true
 		}
 	}
 	if includeOrphans {
-		if err := tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
+		if err := tx.ForEachBucket(func(name []byte) error {
 			if strings.HasPrefix(string(name), "outbound.") {
 				names[string(name)] = true
 			}
@@ -243,49 +249,47 @@ func rewriteWhich(raw json.RawMessage, state referenceTouches, remap referenceRe
 }
 
 // All work here uses the caller's transaction; no db helper may open another.
-func rewriteReferences(tx *bbolt.Tx, state referenceTouches, remap referenceRemap) (bool, error) {
-	if bucket := tx.Bucket([]byte("dockerProxies")); bucket != nil {
-		updates := map[string][]byte{}
-		var blocked []int
-		err := bucket.ForEach(func(key, raw []byte) error {
-			proxy, err := decodeDockerProxy(key, raw)
-			if err != nil {
-				return err
-			}
-			object, _ := readReferenceObject(raw, "Docker proxy")
-			keepProxy := true
-			for _, field := range []string{"which", "frontWhich"} {
-				reference := object[field]
-				if field == "frontWhich" && (reference == nil || bytes.Equal(bytes.TrimSpace(reference), []byte("null"))) {
-					continue
-				}
-				updated, keep, err := rewriteWhich(reference, state, remap, true)
-				if err != nil {
-					return fmt.Errorf("Docker proxy port %d has an invalid or conflicting %s: %w", proxy.Port, field, err)
-				}
-				keepProxy = keepProxy && keep
-				if keep {
-					object[field] = updated
-				}
-			}
-			if !keepProxy {
-				blocked = append(blocked, proxy.Port)
-			}
-			updated, err := json.Marshal(object)
-			updates[string(key)] = updated
-			return err
-		})
+func rewriteReferences(tx store.WriteTx, state referenceTouches, remap referenceRemap) (bool, error) {
+	updates := map[string][]byte{}
+	var blocked []int
+	err := tx.ForEach([]byte("dockerProxies"), func(key, raw []byte) error {
+		proxy, err := decodeDockerProxy(key, raw)
 		if err != nil {
-			return false, err
+			return err
 		}
-		if len(blocked) != 0 {
-			sort.Ints(blocked)
-			return false, fmt.Errorf("nodes are used by Docker proxy ports %v; rebind or remove those proxies first", blocked)
-		}
-		for key, raw := range updates {
-			if err := bucket.Put([]byte(key), raw); err != nil {
-				return false, err
+		object, _ := readReferenceObject(raw, "Docker proxy")
+		keepProxy := true
+		for _, field := range []string{"which", "frontWhich"} {
+			reference := object[field]
+			if field == "frontWhich" && (reference == nil || bytes.Equal(bytes.TrimSpace(reference), []byte("null"))) {
+				continue
 			}
+			updated, keep, err := rewriteWhich(reference, state, remap, true)
+			if err != nil {
+				return fmt.Errorf("Docker proxy port %d has an invalid or conflicting %s: %w", proxy.Port, field, err)
+			}
+			keepProxy = keepProxy && keep
+			if keep {
+				object[field] = updated
+			}
+		}
+		if !keepProxy {
+			blocked = append(blocked, proxy.Port)
+		}
+		updated, err := json.Marshal(object)
+		updates[string(key)] = updated
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(blocked) != 0 {
+		sort.Ints(blocked)
+		return false, fmt.Errorf("nodes are used by Docker proxy ports %v; rebind or remove those proxies first", blocked)
+	}
+	for key, raw := range updates {
+		if err := tx.Put([]byte("dockerProxies"), []byte(key), raw); err != nil {
+			return false, err
 		}
 	}
 	names, err := referenceOutboundNames(tx, true)
@@ -294,11 +298,10 @@ func rewriteReferences(tx *bbolt.Tx, state referenceTouches, remap referenceRema
 	}
 	removed := false
 	for _, name := range names {
-		bucket := tx.Bucket([]byte(name))
-		if bucket == nil {
-			continue
+		raw, err := tx.Get([]byte(name), []byte("connectedServers"))
+		if err != nil {
+			return false, err
 		}
-		raw := bucket.Get([]byte("connectedServers"))
 		if raw == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			continue
 		}
@@ -330,7 +333,7 @@ func rewriteReferences(tx *bbolt.Tx, state referenceTouches, remap referenceRema
 		if err != nil {
 			return false, err
 		}
-		if err = bucket.Put([]byte("connectedServers"), updated); err != nil {
+		if err = tx.Put([]byte(name), []byte("connectedServers"), updated); err != nil {
 			return false, err
 		}
 	}
@@ -341,11 +344,15 @@ func rewriteReferences(tx *bbolt.Tx, state referenceTouches, remap referenceRema
 // reference in the same transaction. The result is true only if a main-core
 // connection was removed; renumbering alone does not require a restart.
 func DeleteTouchesAtomic(whiches []*Which) (bool, error) {
-	return deleteTouchesAtomic(db.DB(), whiches)
+	database, err := db.CurrentStore()
+	if err != nil {
+		return false, err
+	}
+	return deleteTouchesAtomic(database, whiches)
 }
 
-func deleteTouchesAtomic(database *bbolt.DB, whiches []*Which) (removed bool, err error) {
-	err = database.Update(func(tx *bbolt.Tx) error {
+func deleteTouchesAtomic(database store.Store, whiches []*Which) (removed bool, err error) {
+	err = database.Update(func(tx store.WriteTx) error {
 		state, err := loadReferenceTouches(tx)
 		if err != nil {
 			return err
@@ -390,7 +397,6 @@ func deleteTouchesAtomic(database *bbolt.DB, whiches []*Which) (removed bool, er
 		if removed, err = rewriteReferences(tx, state, remap); err != nil {
 			return err
 		}
-		bucket := tx.Bucket([]byte("touch"))
 		for key, deletion := range map[string]map[int]bool{"servers": servers, "subscriptions": subscriptions} {
 			if len(deletion) == 0 {
 				continue
@@ -409,7 +415,7 @@ func deleteTouchesAtomic(database *bbolt.DB, whiches []*Which) (removed bool, er
 			if err != nil {
 				return err
 			}
-			if err = bucket.Put([]byte(key), raw); err != nil {
+			if err = tx.Put([]byte("touch"), []byte(key), raw); err != nil {
 				return err
 			}
 		}
@@ -430,11 +436,15 @@ func referenceIndexAfterDeletion(index int, deleted map[int]bool) int {
 
 // ReadSubscriptionSnapshot copies the original JSON for a later CAS commit.
 func ReadSubscriptionSnapshot(index int) ([]byte, error) {
-	return readSubscriptionSnapshot(db.DB(), index)
+	database, err := db.CurrentStore()
+	if err != nil {
+		return nil, err
+	}
+	return readSubscriptionSnapshot(database, index)
 }
 
-func readSubscriptionSnapshot(database *bbolt.DB, index int) (snapshot []byte, err error) {
-	err = database.View(func(tx *bbolt.Tx) error {
+func readSubscriptionSnapshot(database store.Store, index int) (snapshot []byte, err error) {
+	err = database.View(func(tx store.ReadTx) error {
 		state, err := loadReferenceTouches(tx)
 		if err != nil {
 			return err
@@ -449,11 +459,15 @@ func readSubscriptionSnapshot(database *bbolt.DB, index int) (snapshot []byte, e
 }
 
 func ReadSubscriptionSnapshots() ([][]byte, error) {
-	return readSubscriptionSnapshots(db.DB())
+	database, err := db.CurrentStore()
+	if err != nil {
+		return nil, err
+	}
+	return readSubscriptionSnapshots(database)
 }
 
-func readSubscriptionSnapshots(database *bbolt.DB) (snapshots [][]byte, err error) {
-	err = database.View(func(tx *bbolt.Tx) error {
+func readSubscriptionSnapshots(database store.Store) (snapshots [][]byte, err error) {
+	err = database.View(func(tx store.ReadTx) error {
 		state, err := loadReferenceTouches(tx)
 		if err != nil {
 			return err
@@ -474,21 +488,24 @@ type ConnectedServerSnapshot struct {
 // ReadConnectedServerSnapshot resolves references and nodes from one database
 // version, so a simultaneous delete/reorder cannot select another node.
 func ReadConnectedServerSnapshot() ([]ConnectedServerSnapshot, error) {
-	return readConnectedServerSnapshot(db.DB())
+	database, err := db.CurrentStore()
+	if err != nil {
+		return nil, err
+	}
+	return readConnectedServerSnapshot(database)
 }
 
-func readConnectedServerSnapshot(database *bbolt.DB) (snapshots []ConnectedServerSnapshot, err error) {
-	err = database.View(func(tx *bbolt.Tx) error {
+func readConnectedServerSnapshot(database store.Store) (snapshots []ConnectedServerSnapshot, err error) {
+	err = database.View(func(tx store.ReadTx) error {
 		names, err := referenceOutboundNames(tx, false)
 		if err != nil {
 			return err
 		}
 		for _, name := range names {
-			bucket := tx.Bucket([]byte(name))
-			if bucket == nil {
-				continue
+			raw, err := tx.Get([]byte(name), []byte("connectedServers"))
+			if err != nil {
+				return err
 			}
-			raw := bucket.Get([]byte("connectedServers"))
 			if raw == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 				continue
 			}
@@ -525,21 +542,17 @@ func readConnectedServerSnapshot(database *bbolt.DB) (snapshots []ConnectedServe
 
 // Decode only the referenced entry. An unused malformed subscription must not
 // stop an independent node, or prevent the final connection from being stopped.
-func locateReferenceServerInTx(tx *bbolt.Tx, which Which) (*ServerRaw, error) {
+func locateReferenceServerInTx(tx store.ReadTx, which Which) (*ServerRaw, error) {
 	if which.ID <= 0 || which.TYPE == SubscriptionServerType && which.Sub < 0 {
-		return nil, fmt.Errorf("node reference is out of range")
-	}
-	bucket := tx.Bucket([]byte("touch"))
-	if bucket == nil {
 		return nil, fmt.Errorf("node reference is out of range")
 	}
 	var nodes []json.RawMessage
 	var err error
 	switch which.TYPE {
 	case ServerType:
-		nodes, err = readReferenceList(bucket.Get([]byte("servers")), "servers")
+		nodes, err = readReferenceListInTx(tx, "touch", "servers", "servers")
 	case SubscriptionServerType:
-		subscriptions, e := readReferenceList(bucket.Get([]byte("subscriptions")), "subscriptions")
+		subscriptions, e := readReferenceListInTx(tx, "touch", "subscriptions", "subscriptions")
 		if e != nil {
 			return nil, e
 		}
@@ -564,10 +577,14 @@ func locateReferenceServerInTx(tx *bbolt.Tx, which Which) (*ServerRaw, error) {
 }
 
 func CommitSubscriptionRefresh(index int, expected []byte, servers []ServerRaw, status, info string, disconnectIfNecessary bool) (bool, error) {
-	return commitSubscriptionRefresh(db.DB(), index, expected, servers, status, info, disconnectIfNecessary)
+	database, err := db.CurrentStore()
+	if err != nil {
+		return false, err
+	}
+	return commitSubscriptionRefresh(database, index, expected, servers, status, info, disconnectIfNecessary)
 }
 
-func commitSubscriptionRefresh(database *bbolt.DB, index int, expected []byte, servers []ServerRaw, status, info string, disconnect bool) (removed bool, err error) {
+func commitSubscriptionRefresh(database store.Store, index int, expected []byte, servers []ServerRaw, status, info string, disconnect bool) (removed bool, err error) {
 	newServers := make([]json.RawMessage, 0, len(servers))
 	newIdentities := map[string][]int{}
 	for i, server := range servers {
@@ -582,7 +599,7 @@ func commitSubscriptionRefresh(database *bbolt.DB, index int, expected []byte, s
 		newServers = append(newServers, raw)
 		newIdentities[identity] = append(newIdentities[identity], i)
 	}
-	err = database.Update(func(tx *bbolt.Tx) error {
+	err = database.Update(func(tx store.WriteTx) error {
 		state, err := loadReferenceTouches(tx)
 		if err != nil {
 			return err
@@ -664,7 +681,7 @@ func commitSubscriptionRefresh(database *bbolt.DB, index int, expected []byte, s
 		if err != nil {
 			return err
 		}
-		return tx.Bucket([]byte("touch")).Put([]byte("subscriptions"), raw)
+		return tx.Put([]byte("touch"), []byte("subscriptions"), raw)
 	})
 	return removed && err == nil, err
 }

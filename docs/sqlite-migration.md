@@ -46,6 +46,8 @@ SQLite v1 保留完整桶树，包括未知及非 UTF-8 名字、键和值、嵌
 
 本阶段没有按节点、账号等实体拆表的投影，没有稳定节点 ID 的运行时写入接口，也不承诺运行性能提升。冻结副本完整往返通过后，才能继续设计运行时 schema 和切换策略。
 
+应用运行时已统一到 [`db/store` 事务接口](../service/db/store/interface.go)，当前仍由 Bolt 适配器执行，读操作不再开启写事务。此接口为后续 SQLite 实现准备了相同的快照、提交和回滚边界，没有启用 SQLite 运行后端；冻结候选仍保持上述用途。[完整迁移进度](upstream-migration.md)
+
 候选使用单文件 `DELETE` 日志模式与完整同步，操作会取得所在目录的实例锁。验证先复制源文件到同目录的私有临时目录并核对源未变化，再由 SQLite 只读打开该副本；原文件不交给 SQLite 修改。目录仍需允许创建或打开稳定锁文件及临时副本，不要手动删除锁文件。发现 `-wal`、`-shm` 或 `-journal` 边文件时拒绝操作，不自动删除它们，也不尝试把运行库当作冻结候选读取。WAL 是数据库持久状态的一部分，单独复制主文件可能丢失已提交事务；未来在线备份应使用支持该状态的 SQLite 备份机制。[SQLite WAL](https://sqlite.org/wal.html)、[备份 API](https://sqlite.org/backup.html)
 
 完整性校验和外键校验各有作用，`integrity_check` 不覆盖外键错误。清单比较仍用于证明 KV 字节、层级和 sequence 与原归档一致；摘要提供损坏检测，不认证归档来源。[SQLite PRAGMA](https://sqlite.org/pragma.html#pragma_integrity_check)

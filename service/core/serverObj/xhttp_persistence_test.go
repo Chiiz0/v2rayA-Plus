@@ -15,7 +15,7 @@ import (
 )
 
 // Exercise the production list codec and a real close/reopen of Bolt without
-// touching db.DB(), which may point at the user's running configuration.
+// touching the runtime database, which may point at the user's configuration.
 func persistXHTTPFixture(t *testing.T, value interface{}) []byte {
 	t.Helper()
 	list, err := sjson.SetBytes([]byte("[]"), "-1", value)

@@ -40,20 +40,24 @@ jobs:
       - name: Service regression tests
         run: CGO_ENABLED=0 go test ./...
       - name: Database race tests
-        run: go test -race ./common/instancelock ./db/backup ./db/sqlitebackup ./cmd/v2raya-db
+        run: go test -race ./common/instancelock ./db/... ./cmd/v2raya-db ./server/service
       - uses: docker/setup-qemu-action@v3
-      - name: Run static SQLite binaries on both release architectures
+      - name: Run static database binaries on both release architectures
         shell: bash
         run: |
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -o "$RUNNER_TEMP/v2raya-db-$arch" ./cmd/v2raya-db
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/sqlitebackup-$arch.test" ./db/sqlitebackup
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$RUNNER_TEMP/store-$arch.test" ./db/store
             docker run --rm --platform "linux/$arch" --network none --read-only \
               --mount "type=bind,src=$RUNNER_TEMP/v2raya-db-$arch,dst=/v2raya-db,readonly" \
               --entrypoint /v2raya-db alpine:3.23 sqlite-info
             docker run --rm --platform "linux/$arch" --network none --read-only --tmpfs /tmp:rw,mode=1777 \
               --mount "type=bind,src=$RUNNER_TEMP/sqlitebackup-$arch.test,dst=/sqlitebackup.test,readonly" \
               --entrypoint /sqlitebackup.test alpine:3.23 -test.v -test.timeout=5m
+            docker run --rm --platform "linux/$arch" --network none --read-only --tmpfs /tmp:rw,mode=1777 \
+              --mount "type=bind,src=$RUNNER_TEMP/store-$arch.test,dst=/store.test,readonly" \
+              --entrypoint /store.test alpine:3.23 -test.v -test.timeout=5m
           done
 
   build-and-push:

@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/gob"
+	"fmt"
 
 	"github.com/v2rayA/v2rayA/common"
-	"go.etcd.io/bbolt"
+	"github.com/v2rayA/v2rayA/db/store"
 )
 
 type set map[[32]byte]interface{}
@@ -28,30 +29,32 @@ func toSha256(val interface{}) (hash [32]byte, err error) {
 	return hash, nil
 }
 
-func setOp(bucket string, key string, f func(m set) (readonly bool, err error)) (err error) {
-	return Transaction(DB(), func(tx *bbolt.Tx) (bool, error) {
-		dirty := false
-		if bkt, err := CreateBucketIfNotExists(tx, []byte(bucket), &dirty); err != nil {
-			return dirty, err
-		} else {
-			var m set
-			v := bkt.Get([]byte(key))
-			if v == nil {
-				m = make(set)
-			} else if err := gob.NewDecoder(bytes.NewReader(v)).Decode(&m); err != nil {
-				return dirty, err
-			}
-			if readonly, err := f(m); err != nil {
-				return dirty, err
-			} else if readonly {
-				return dirty, nil
-			}
-			if b, err := common.ToBytes(m); err != nil {
-				return dirty, err
-			} else {
-				return true, bkt.Put([]byte(key), b)
-			}
+func readSet(tx store.ReadTx, bucket, key string) (set, error) {
+	v, err := tx.Get([]byte(bucket), []byte(key))
+	if err != nil {
+		return nil, err
+	}
+	m := make(set)
+	if v != nil {
+		if err := gob.NewDecoder(bytes.NewReader(v)).Decode(&m); err != nil {
+			return nil, err
 		}
+	}
+	return m, nil
+}
+
+func setOp(bucket string, key string, f func(m set)) error {
+	return Update(func(tx store.WriteTx) error {
+		m, err := readSet(tx, bucket, key)
+		if err != nil {
+			return err
+		}
+		f(m)
+		b, err := common.ToBytes(m)
+		if err != nil {
+			return err
+		}
+		return tx.Put([]byte(bucket), []byte(key), b)
 	})
 }
 
@@ -60,9 +63,8 @@ func SetAdd(bucket string, key string, val interface{}) (err error) {
 	if err != nil {
 		return err
 	}
-	return setOp(bucket, key, func(m set) (readonly bool, err error) {
+	return setOp(bucket, key, func(m set) {
 		m[h] = val
-		return false, nil
 	})
 }
 
@@ -71,20 +73,27 @@ func SetRemove(bucket string, key string, val interface{}) (err error) {
 	if err != nil {
 		return err
 	}
-	return setOp(bucket, key, func(m set) (readonly bool, err error) {
+	return setOp(bucket, key, func(m set) {
 		if _, ok := m[h]; ok {
 			delete(m, h)
 		}
-		return false, nil
 	})
 }
 
 func StringSetGetAll(bucket string, key string) (members []string, err error) {
-	err = setOp(bucket, key, func(m set) (readonly bool, err error) {
-		for _, v := range m {
-			members = append(members, v.(string))
+	err = View(func(tx store.ReadTx) error {
+		m, err := readSet(tx, bucket, key)
+		if err != nil {
+			return err
 		}
-		return true, nil
+		for _, v := range m {
+			member, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("StringSetGetAll: member is not a string")
+			}
+			members = append(members, member)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

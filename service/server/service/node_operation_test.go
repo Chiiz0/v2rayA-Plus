@@ -13,7 +13,7 @@ import (
 	"github.com/v2rayA/v2rayA/core/serverObj"
 	"github.com/v2rayA/v2rayA/db"
 	"github.com/v2rayA/v2rayA/db/configure"
-	"go.etcd.io/bbolt"
+	"github.com/v2rayA/v2rayA/db/store"
 )
 
 func nodeOperationServer(name string) configure.ServerRaw {
@@ -55,22 +55,18 @@ func saveNodeOperationProxy(t *testing.T, proxy configure.DockerProxy) {
 func nodeOperationSnapshot(t *testing.T) map[string]string {
 	t.Helper()
 	contents := make(map[string]string)
-	err := db.DB().View(func(tx *bbolt.Tx) error {
-		var visit func(string, *bbolt.Bucket) error
-		visit = func(prefix string, bucket *bbolt.Bucket) error {
-			return bucket.ForEach(func(k, v []byte) error {
-				key := prefix + "/" + string(k)
-				if v == nil {
-					contents[key] = "<bucket>"
-					return visit(key, bucket.Bucket(k))
+	err := db.View(func(tx store.ReadTx) error {
+		return tx.ForEachBucket(func(name []byte) error {
+			contents[string(name)] = "<bucket>"
+			return tx.ForEach(name, func(key, value []byte) error {
+				// Service fixtures use top-level buckets. Reject unexpected
+				// nesting so this comparison can never silently omit data.
+				if value == nil {
+					return fmt.Errorf("unexpected nested bucket in service fixture")
 				}
-				contents[key] = string(v)
+				contents[string(name)+"/"+string(key)] = string(value)
 				return nil
 			})
-		}
-		return tx.ForEach(func(name []byte, bucket *bbolt.Bucket) error {
-			contents[string(name)] = "<bucket>"
-			return visit(string(name), bucket)
 		})
 	})
 	if err != nil {
@@ -218,12 +214,8 @@ func TestDeleteWhichRejectsDockerDependenciesAtomically(t *testing.T) {
 func TestDeleteWhichRejectsMalformedDockerJSONAtomically(t *testing.T) {
 	seedNodeOperationDB(t)
 	dir := fakeNodeOperationDocker(t, "")
-	if err := db.DB().Update(func(tx *bbolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte("dockerProxies"))
-		if err != nil {
-			return err
-		}
-		return bucket.Put([]byte("19001"), []byte(`{"port":19001,"which":`))
+	if err := db.Update(func(tx store.WriteTx) error {
+		return tx.Put([]byte("dockerProxies"), []byte("19001"), []byte(`{"port":19001,"which":`))
 	}); err != nil {
 		t.Fatal(err)
 	}

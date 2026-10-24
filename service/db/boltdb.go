@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/v2rayA/v2rayA/conf"
-	"github.com/v2rayA/v2rayA/pkg/util/log"
+	"github.com/v2rayA/v2rayA/db/store"
 	"go.etcd.io/bbolt"
 )
 
@@ -20,6 +20,7 @@ var database databaseState
 
 type databaseState struct {
 	handle        *bbolt.DB
+	backend       store.Store
 	initialized   bool
 	readOnly      bool
 	temporaryPath string
@@ -72,20 +73,61 @@ func (state *databaseState) open(path string, existingOnly bool, timeout time.Du
 	}
 	state.initialized = true
 	state.handle, state.temporaryPath, state.initErr = openDatabase(path, state.readOnly, !existingOnly, timeout)
+	if state.initErr == nil {
+		state.backend = store.NewBolt(state.handle)
+	}
 	return state.initErr
 }
 
-func DB() *bbolt.DB {
+// CurrentStore returns the configured transaction interface. Callers must not
+// open a second global transaction from inside a transaction callback: reuse the
+// callback's ReadTx/WriteTx so multi-object updates share one commit boundary.
+// Startup retains ownership of the physical handle and closes it after users
+// have stopped. This accessor propagates initialization errors without exiting.
+func CurrentStore() (store.Store, error) {
 	databaseMu.Lock()
 	defer databaseMu.Unlock()
 	if err := initDatabaseLocked(false); err != nil {
-		log.Fatal("bbolt.Open: %v", err)
+		return nil, err
 	}
-	return database.handle
+	return database.currentStore()
+}
+
+func (state *databaseState) currentStore() (store.Store, error) {
+	if state.initErr != nil {
+		return nil, state.initErr
+	}
+	if state.backend == nil {
+		if state.handle == nil {
+			return nil, bbolt.ErrDatabaseNotOpen
+		}
+		state.backend = store.NewBolt(state.handle)
+	}
+	return state.backend, nil
+}
+
+// View runs a consistent read-only snapshot without creating buckets or taking
+// the database's writer lock. Returned values belong to the caller.
+func View(fn func(store.ReadTx) error) error {
+	backend, err := CurrentStore()
+	if err != nil {
+		return err
+	}
+	return backend.View(fn)
+}
+
+// Update commits all callback changes together, or rolls them back on error or
+// panic. Do not perform network, Docker or other external work in the callback.
+func Update(fn func(store.WriteTx) error) error {
+	backend, err := CurrentStore()
+	if err != nil {
+		return err
+	}
+	return backend.Update(fn)
 }
 
 // Close only closes an already opened database; it never creates one during
-// cleanup. The caller must have stopped users of DB before invoking Close.
+// cleanup. The caller must have stopped transaction users before invoking Close.
 func Close() error {
 	databaseMu.Lock()
 	defer databaseMu.Unlock()
@@ -97,6 +139,7 @@ func (state *databaseState) close() error {
 	if state.handle != nil {
 		err = state.handle.Close()
 		state.handle = nil
+		state.backend = nil
 		state.initErr = bbolt.ErrDatabaseNotOpen
 	}
 	if state.temporaryPath != "" {
@@ -158,8 +201,8 @@ func openReadOnly(path string, timeout time.Duration) (*bbolt.DB, error) {
 
 func openDatabase(path string, readOnly, create bool, timeout time.Duration) (handle *bbolt.DB, temporaryPath string, err error) {
 	if readOnly {
-		// Existing getters may create buckets. Run them against a consistent
-		// private snapshot, never against the original reporting database.
+		// Reports may invoke initialization or normalization paths. Keep those
+		// operations on a consistent private snapshot, never on the source.
 		path, err = snapshotDatabase(path, timeout)
 		if err != nil {
 			return nil, "", err
@@ -211,37 +254,4 @@ func snapshotDatabase(path string, timeout time.Duration) (snapshotPath string, 
 	})
 	err = errors.Join(err, file.Close())
 	return snapshotPath, err
-}
-
-// The function should return a dirty flag.
-// If the dirty flag is true and there is no error then the transaction is commited.
-// Otherwise, the transaction is rolled back.
-func Transaction(db *bbolt.DB, fn func(*bbolt.Tx) (bool, error)) error {
-	tx, err := db.Begin(true)
-	if err != nil {
-		return err
-	}
-	dirty, err := fn(tx)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if !dirty {
-		return tx.Rollback()
-	}
-	return tx.Commit()
-}
-
-// If the bucket does not exist, the dirty flag is setted
-func CreateBucketIfNotExists(tx *bbolt.Tx, name []byte, dirty *bool) (*bbolt.Bucket, error) {
-	bkt := tx.Bucket(name)
-	if bkt != nil {
-		return bkt, nil
-	}
-	bkt, err := tx.CreateBucket(name)
-	if err != nil {
-		return nil, err
-	}
-	*dirty = true
-	return bkt, nil
 }

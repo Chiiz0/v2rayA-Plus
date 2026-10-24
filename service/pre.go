@@ -200,7 +200,9 @@ func initConfigure(legacy *bbolt.DB) {
 func recoverResolverOnStartup() {
 	// The directory lock is already held. Also retain Bolt's exclusive lock to
 	// exclude older releases that do not know the directory lock file.
-	_ = db.DB()
+	if err := db.Init(); err != nil {
+		log.Fatal("initialize database before DNS recovery: %v", err)
+	}
 	if err := v2ray.RecoverResolvConf(); err != nil {
 		log.Warn("restore DNS from the previous run: %v", err)
 	}

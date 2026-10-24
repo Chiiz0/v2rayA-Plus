@@ -7,7 +7,7 @@ import (
 
 	"github.com/v2rayA/v2rayA/conf"
 	"github.com/v2rayA/v2rayA/db"
-	"go.etcd.io/bbolt"
+	"github.com/v2rayA/v2rayA/db/store"
 )
 
 func TestMain(m *testing.M) {
@@ -20,9 +20,13 @@ func TestMain(m *testing.M) {
 	// directory. These tests never read a running installation's database.
 	_ = os.Setenv("V2RAYA_CONFIG", directory)
 	conf.GetEnvironmentConfig().Config = directory
-	database := db.DB()
+	if err := db.Init(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		_ = os.RemoveAll(directory)
+		os.Exit(1)
+	}
 	code := m.Run()
-	_ = database.Close()
+	_ = db.Close()
 	_ = os.RemoveAll(directory)
 	os.Exit(code)
 }
@@ -31,9 +35,9 @@ func resetNodeTestDB(t *testing.T) {
 	t.Helper()
 	nodeOperationMu.Lock()
 	defer nodeOperationMu.Unlock()
-	if err := db.DB().Update(func(tx *bbolt.Tx) error {
+	if err := db.Update(func(tx store.WriteTx) error {
 		var names [][]byte
-		if err := tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
+		if err := tx.ForEachBucket(func(name []byte) error {
 			names = append(names, append([]byte(nil), name...))
 			return nil
 		}); err != nil {

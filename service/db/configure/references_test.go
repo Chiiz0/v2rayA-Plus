@@ -16,6 +16,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"github.com/v2rayA/v2rayA/core/serverObj"
+	"github.com/v2rayA/v2rayA/db/store"
 	"go.etcd.io/bbolt"
 )
 
@@ -132,7 +133,7 @@ func TestDeleteTouchesAtomicRemapsAllReferences(t *testing.T) {
 	referenceTestConnections(t, database, "中", Which{TYPE: SubscriptionServerType, Sub: 2, ID: 2, Outbound: "中"})
 	referenceTestConnections(t, database, "x", Which{TYPE: ServerType, ID: 3, Outbound: "x"})
 	referenceTestConnections(t, database, "orphan", Which{TYPE: ServerType, ID: 4, Outbound: "orphan"})
-	removed, err := deleteTouchesAtomic(database, []*Which{{TYPE: ServerType, ID: 5}, {TYPE: ServerType, ID: 2}, {TYPE: ServerType, ID: 1}, {TYPE: SubscriptionType, ID: 1}, {TYPE: ServerType, ID: 2}})
+	removed, err := deleteTouchesAtomic(store.NewBolt(database), []*Which{{TYPE: ServerType, ID: 5}, {TYPE: ServerType, ID: 2}, {TYPE: ServerType, ID: 1}, {TYPE: SubscriptionType, ID: 1}, {TYPE: ServerType, ID: 2}})
 	if err != nil || !removed {
 		t.Fatalf("delete = %v, %v", removed, err)
 	}
@@ -196,7 +197,7 @@ func TestDeleteTouchesAtomicRefusesAndRollsBack(t *testing.T) {
 				referenceTestPut(t, database, "outbound.proxy", "connectedServers", []byte(`{"touches":[{"id":99,"_type":"server"}]}`))
 			}
 			before := referenceTestContents(t, database)
-			removed, err := deleteTouchesAtomic(database, deletion)
+			removed, err := deleteTouchesAtomic(store.NewBolt(database), deletion)
 			if err == nil || removed || strings.Contains(err.Error(), "do-not-report") {
 				t.Fatalf("expected clean refusal, got %v, %v", removed, err)
 			}
@@ -223,7 +224,7 @@ func TestSubscriptionRefreshAtomicRemapAndMetadata(t *testing.T) {
 	for _, name := range []string{"proxy", "中", "x"} {
 		referenceTestConnections(t, database, name, Which{TYPE: SubscriptionServerType, Sub: 0, ID: 2, Outbound: name})
 	}
-	snapshot, err := readSubscriptionSnapshot(database, 0)
+	snapshot, err := readSubscriptionSnapshot(store.NewBolt(database), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestSubscriptionRefreshAtomicRemapAndMetadata(t *testing.T) {
 		}
 		fresh = append(fresh, *node)
 	}
-	removed, err := commitSubscriptionRefresh(database, 0, snapshot, fresh, "new status", "new info", true)
+	removed, err := commitSubscriptionRefresh(store.NewBolt(database), 0, snapshot, fresh, "new status", "new info", true)
 	if err != nil || removed {
 		t.Fatalf("refresh = %v, %v", removed, err)
 	}
@@ -269,9 +270,9 @@ func TestSubscriptionRefreshMissingConnections(t *testing.T) {
 			for _, name := range []string{"proxy", "中"} {
 				referenceTestConnections(t, database, name, Which{TYPE: SubscriptionServerType, Sub: 0, ID: 1, Outbound: name})
 			}
-			snapshot, _ := readSubscriptionSnapshot(database, 0)
+			snapshot, _ := readSubscriptionSnapshot(store.NewBolt(database), 0)
 			fresh, _ := Bytes2ServerRaw(referenceTestNode(t, "new"))
-			removed, err := commitSubscriptionRefresh(database, 0, snapshot, []ServerRaw{*fresh}, "new", "new", disconnect)
+			removed, err := commitSubscriptionRefresh(store.NewBolt(database), 0, snapshot, []ServerRaw{*fresh}, "new", "new", disconnect)
 			if err != nil || removed != disconnect {
 				t.Fatalf("refresh = %v, %v", removed, err)
 			}
@@ -315,7 +316,7 @@ func TestSubscriptionRefreshRefusesMissingAmbiguousAndStale(t *testing.T) {
 			}
 			referenceTestPut(t, database, "touch", "subscriptions", marshalRaw(t, []json.RawMessage{referenceTestSub(t, old...)}))
 			referenceTestProxy(t, database, 1080, which, front)
-			snapshot, _ := readSubscriptionSnapshot(database, 0)
+			snapshot, _ := readSubscriptionSnapshot(store.NewBolt(database), 0)
 			if scenario == "stale snapshot" {
 				changed, _ := sjson.SetBytes(snapshot, "remarks", "edited during download")
 				referenceTestPut(t, database, "touch", "subscriptions", marshalRaw(t, []json.RawMessage{changed}))
@@ -326,7 +327,7 @@ func TestSubscriptionRefreshRefusesMissingAmbiguousAndStale(t *testing.T) {
 				nodes = append(nodes, *node)
 			}
 			before := referenceTestContents(t, database)
-			removed, err := commitSubscriptionRefresh(database, 0, snapshot, nodes, "new", "new", false)
+			removed, err := commitSubscriptionRefresh(store.NewBolt(database), 0, snapshot, nodes, "new", "new", false)
 			if err == nil || removed {
 				t.Fatalf("expected refresh refusal, got %v, %v", removed, err)
 			}
@@ -344,7 +345,7 @@ func TestSubscriptionRefreshConcurrentCAS(t *testing.T) {
 	database := referenceTestDB(t)
 	node := referenceTestNode(t, "same")
 	referenceTestPut(t, database, "touch", "subscriptions", marshalRaw(t, []json.RawMessage{referenceTestSub(t, node)}))
-	snapshot, _ := readSubscriptionSnapshot(database, 0)
+	snapshot, _ := readSubscriptionSnapshot(store.NewBolt(database), 0)
 	parsed, _ := Bytes2ServerRaw(node)
 	errors := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -352,7 +353,7 @@ func TestSubscriptionRefreshConcurrentCAS(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := commitSubscriptionRefresh(database, 0, snapshot, []ServerRaw{*parsed}, fmt.Sprint(i), "new", false)
+			_, err := commitSubscriptionRefresh(store.NewBolt(database), 0, snapshot, []ServerRaw{*parsed}, fmt.Sprint(i), "new", false)
 			errors <- err
 		}(i)
 	}
@@ -372,7 +373,7 @@ func TestReadConnectedServerSnapshotKeepsPositionsAndOrder(t *testing.T) {
 	referenceTestConnections(t, database, "x", Which{TYPE: ServerType, ID: 3, Outbound: "x"})
 	referenceTestConnections(t, database, "中", Which{TYPE: ServerType, ID: 2, Outbound: "中"})
 	referenceTestPut(t, database, "dockerProxies", "1080", []byte("broken unrelated Docker metadata"))
-	snapshot, err := readConnectedServerSnapshot(database)
+	snapshot, err := readConnectedServerSnapshot(store.NewBolt(database))
 	if err != nil || len(snapshot) != 3 {
 		t.Fatalf("read connected = %+v, %v", snapshot, err)
 	}
@@ -385,7 +386,7 @@ func TestReadConnectedServerSnapshotKeepsPositionsAndOrder(t *testing.T) {
 		t.Fatal("bad preceding record shifted the selected nodes")
 	}
 	referenceTestConnections(t, database, "proxy", Which{TYPE: ServerType, ID: 1})
-	if _, err = readConnectedServerSnapshot(database); err == nil {
+	if _, err = readConnectedServerSnapshot(store.NewBolt(database)); err == nil {
 		t.Fatal("accepted a reference to an invalid node")
 	}
 }
@@ -400,7 +401,7 @@ func TestReadConnectedServerSnapshotConcurrentDelete(t *testing.T) {
 	go func() {
 		close(ready)
 		for i := 0; i < 1000; i++ {
-			snapshot, err := readConnectedServerSnapshot(database)
+			snapshot, err := readConnectedServerSnapshot(store.NewBolt(database))
 			if err != nil {
 				result <- err
 				return
@@ -413,7 +414,7 @@ func TestReadConnectedServerSnapshotConcurrentDelete(t *testing.T) {
 		result <- nil
 	}()
 	<-ready
-	if removed, err := deleteTouchesAtomic(database, []*Which{{TYPE: ServerType, ID: 1}}); err != nil || removed {
+	if removed, err := deleteTouchesAtomic(store.NewBolt(database), []*Which{{TYPE: ServerType, ID: 1}}); err != nil || removed {
 		t.Fatalf("renumber-only delete = %v, %v", removed, err)
 	}
 	if err := <-result; err != nil {
@@ -430,7 +431,7 @@ func TestReadConnectedServerSnapshotIgnoresUnusedBrokenSubscriptions(t *testing.
 			if connected {
 				referenceTestConnections(t, database, "proxy", Which{TYPE: ServerType, ID: 1})
 			}
-			snapshot, err := readConnectedServerSnapshot(database)
+			snapshot, err := readConnectedServerSnapshot(store.NewBolt(database))
 			if err != nil || !connected && len(snapshot) != 0 || connected && (len(snapshot) != 1 || snapshot[0].Server.ServerObj.GetName() != "valid") {
 				t.Fatalf("unused subscription affected connected snapshot: %+v, %v", snapshot, err)
 			}
@@ -444,7 +445,7 @@ func TestReferenceTransactionWriteFailurePreservesData(t *testing.T) {
 	referenceTestPut(t, database, "touch", "servers", marshalRaw(t, nodes))
 	referenceTestPut(t, database, "touch", "subscriptions", marshalRaw(t, []json.RawMessage{referenceTestSub(t, nodes...)}))
 	referenceTestProxy(t, database, 1080, Which{TYPE: ServerType, ID: 2}, nil)
-	snapshot, _ := readSubscriptionSnapshot(database, 0)
+	snapshot, _ := readSubscriptionSnapshot(store.NewBolt(database), 0)
 	before := referenceTestContents(t, database)
 	path := database.Path()
 	if err := database.Close(); err != nil {
@@ -455,11 +456,11 @@ func TestReferenceTransactionWriteFailurePreservesData(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readonly.Close()
-	if removed, err := deleteTouchesAtomic(readonly, []*Which{{TYPE: ServerType, ID: 1}}); removed || !errors.Is(err, bbolt.ErrDatabaseReadOnly) {
+	if removed, err := deleteTouchesAtomic(store.NewBolt(readonly), []*Which{{TYPE: ServerType, ID: 1}}); removed || !errors.Is(err, bbolt.ErrDatabaseReadOnly) {
 		t.Fatalf("expected write failure: %v, %v", removed, err)
 	}
 	node, _ := Bytes2ServerRaw(nodes[0])
-	if removed, err := commitSubscriptionRefresh(readonly, 0, snapshot, []ServerRaw{*node}, "new", "new", true); removed || !errors.Is(err, bbolt.ErrDatabaseReadOnly) {
+	if removed, err := commitSubscriptionRefresh(store.NewBolt(readonly), 0, snapshot, []ServerRaw{*node}, "new", "new", true); removed || !errors.Is(err, bbolt.ErrDatabaseReadOnly) {
 		t.Fatalf("expected write failure: %v, %v", removed, err)
 	}
 	if !reflect.DeepEqual(before, referenceTestContents(t, readonly)) {
@@ -506,14 +507,14 @@ func TestReferenceIdentityVLESSLegacyXHTTPAndEncryption(t *testing.T) {
 	database := referenceTestDB(t)
 	referenceTestPut(t, database, "touch", "subscriptions", marshalRaw(t, []json.RawMessage{referenceTestSub(t, legacy)}))
 	referenceTestProxy(t, database, 1080, Which{TYPE: SubscriptionServerType, Sub: 0, ID: 1}, nil)
-	snapshot, _ := readSubscriptionSnapshot(database, 0)
-	if _, err = commitSubscriptionRefresh(database, 0, snapshot, []ServerRaw{{ServerObj: node}}, "updated", "", false); err != nil {
+	snapshot, _ := readSubscriptionSnapshot(store.NewBolt(database), 0)
+	if _, err = commitSubscriptionRefresh(store.NewBolt(database), 0, snapshot, []ServerRaw{{ServerObj: node}}, "updated", "", false); err != nil {
 		t.Fatalf("legacy Docker node failed equivalent refresh: %v", err)
 	}
-	snapshot, _ = readSubscriptionSnapshot(database, 0)
+	snapshot, _ = readSubscriptionSnapshot(store.NewBolt(database), 0)
 	node.Encryption = "none"
 	before := referenceTestContents(t, database)
-	if _, err = commitSubscriptionRefresh(database, 0, snapshot, []ServerRaw{{ServerObj: node}}, "changed", "", false); err == nil {
+	if _, err = commitSubscriptionRefresh(store.NewBolt(database), 0, snapshot, []ServerRaw{{ServerObj: node}}, "changed", "", false); err == nil {
 		t.Fatal("changed encryption unexpectedly matched referenced node")
 	}
 	if !reflect.DeepEqual(before, referenceTestContents(t, database)) {
@@ -536,7 +537,7 @@ func TestReferenceIdentityKeepsNestedUnknownFieldsAndRejectsNil(t *testing.T) {
 	}
 	database := referenceTestDB(t)
 	for _, node := range []ServerRaw{{}, {ServerObj: (*serverObj.V2Ray)(nil)}} {
-		if _, err := commitSubscriptionRefresh(database, 0, nil, []ServerRaw{node}, "", "", false); err == nil {
+		if _, err := commitSubscriptionRefresh(store.NewBolt(database), 0, nil, []ServerRaw{node}, "", "", false); err == nil {
 			t.Fatal("nil node must be rejected before starting a transaction")
 		}
 	}
