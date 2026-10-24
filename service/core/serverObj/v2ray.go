@@ -243,6 +243,22 @@ func ParseVmessURL(vmess string) (data *V2Ray, err error) {
 			info.Net = "ws"
 		}
 	} else {
+		// Some VMess exporters use JSON numbers instead of strings for these
+		// integer fields. Normalize them without depending on global decoders.
+		for _, key := range []string{"port", "aid", "v"} {
+			field := gjson.Get(raw, key)
+			if field.Type != gjson.Number {
+				continue
+			}
+			value := field.Int()
+			if field.Float() != float64(value) {
+				return nil, fmt.Errorf("invalid VMess %s: expected an integer", key)
+			}
+			raw, err = sjson.Set(raw, key, strconv.FormatInt(value, 10))
+			if err != nil {
+				return nil, err
+			}
+		}
 		// fuzzily parse allowInsecure
 		if allowInsecure := gjson.Get(raw, "allowInsecure"); allowInsecure.Exists() {
 			if newRaw, err := sjson.Set(raw, "allowInsecure", allowInsecure.Bool()); err == nil {
@@ -276,6 +292,11 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 	case "vmess", "vless":
 		id := v.ID
 		network := v.Net
+		// Xray renamed TCP to RAW; use TCP in generated configurations so
+		// the same link also works with external V2Fly and older Xray cores.
+		if strings.EqualFold(network, "raw") {
+			network = "tcp"
+		}
 		if l := len([]byte(id)); l < 32 || l > 36 {
 			id = common.StringToUUID5(id)
 		}
@@ -339,7 +360,7 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 		}
 		// 根据传输协议(network)修改streamSettings
 		//TODO: QUIC
-		switch strings.ToLower(v.Net) {
+		switch strings.ToLower(network) {
 		case "grpc":
 			if v.Path == "" {
 				v.Path = "GunService"
@@ -521,14 +542,14 @@ func (v *V2Ray) ExportToURL() string {
 		setValue(&query, "security", v.TLS)
 		setValue(&query, "encryption", v.vlessEncryption())
 		setValue(&query, "flow", v.Flow)
-		switch v.Net {
+		switch strings.ToLower(v.Net) {
 		case "websocket", "ws", "http", "h2":
 			setValue(&query, "path", v.Path)
 			setValue(&query, "host", v.Host)
 		case "mkcp", "kcp":
 			setValue(&query, "headerType", v.Type)
 			setValue(&query, "seed", v.Path)
-		case "tcp":
+		case "tcp", "raw":
 			setValue(&query, "headerType", v.Type)
 			setValue(&query, "host", v.Host)
 			setValue(&query, "path", v.Path)

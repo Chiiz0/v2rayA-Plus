@@ -79,6 +79,9 @@ func ParseSSURL(u string) (data *Shadowsocks, err error) {
 	content := u
 	// try to parse the ss:// link, if it fails, base64 decode first
 	if v, ok = parse(content); !ok {
+		if !strings.HasPrefix(content, "ss://") || len(content) <= len("ss://") {
+			return nil, fmt.Errorf("%w: expected ss:// followed by a server", ErrInvalidParameter)
+		}
 		// 进行base64解码，并unmarshal到VmessInfo上
 		t := content[5:]
 		var l, r string
@@ -453,7 +456,9 @@ func ParseSip003(plugin string) Sip003 {
 	default:
 		sip003.Name = fields[0]
 	}
-	sip003.Opts = ParseSip003Opts(fields[1])
+	if len(fields) == 2 {
+		sip003.Opts = ParseSip003Opts(fields[1])
+	}
 	return sip003
 }
 
