@@ -16,6 +16,8 @@ DNS 恢复文件和 Docker 卷属于数据库之外的状态，必须分别处�
 
 先更新到包含此工具的镜像。以下命令从项目的 Compose 目录执行；备份需要停止主服务，已有代理容器不会被此工具操作。只读导出也需要获取 Bolt 文件锁，默认等待 3 秒，仍被运行中的服务占用时会失败。
 
+先核对实际部署的 Compose 文件和容器挂载。仓库默认配置使用端口映射；已有部署可能使用主机网络、自定义透明代理钩子、独立代理网络或不同的数据卷名。升级和恢复应保留这些部署约定，不能直接用仓库示例覆盖现有 Compose，也不能仅凭同名镜像标签判断运行内容相同。
+
 ```bash
 mkdir -m 700 backups
 docker compose stop v2raya-plus
@@ -70,6 +72,37 @@ docker compose run --rm --no-deps --entrypoint v2raya-db \
 该模式只调用带超时的容器和卷 `inspect`，区分存在、缺失与无法访问，并检查明确指定的内核镜像、配置卷挂载和 SOCKS 端口映射。它不会输出完整 inspect 数据，不执行容器内部命令、不创建辅助容器。检查发现缺失、无法核对或元数据差异时返回 `2`。
 
 Docker 卷内的协议配置内容没有归档或比较，卷本身也不会恢复。节点、前置链的实际配置及网络可用性仍需在恢复演练中单独验证；`--docker` 通过仅代表上述元数据检查通过。
+
+## 外部代理卷恢复演练
+
+运行中的卷即使以只读方式挂载后执行 `tar`，也不是一致快照。主服务更新代理配置时会重写卷内文件，归档可能读到部分内容；数据库归档和卷归档也不自动属于同一时刻。真实备份应先协调停止配置写入，并与离线数据库备份配套保存。不要从运行中的 Bolt 文件复制一个“离线备份”。
+
+先用合成数据和两个临时卷验证所选辅助镜像；之后才对已停止写入的真实源卷执行同样步骤。以下示例只导出源卷、恢复到全新的测试卷，不会接管或重建线上代理。将变量替换为已核实的源卷名、新归档名和固定版本的辅助镜像；归档必须来自可信来源。
+
+```bash
+SOURCE_VOLUME=v2raya-socks-12345
+HELPER_IMAGE=alpine:3.23
+ARCHIVE=backups/proxy-volume-unique.tar
+docker volume inspect "$SOURCE_VOLUME" >/dev/null
+
+# 新归档权限为 0600；已有文件会被 shell 的 noclobber 拒绝。
+(umask 077; set -C
+ docker run --rm --network none --read-only \
+   --mount "type=volume,source=$SOURCE_VOLUME,target=/source,readonly" \
+   "$HELPER_IMAGE" tar -C /source -cpf - . > "$ARCHIVE")
+
+# 不传名称，让 Docker 创建一个全新随机命名的测试卷。
+RESTORE_VOLUME=$(docker volume create --label v2raya.restore-test=true)
+docker run --rm -i --network none --read-only \
+  --mount "type=volume,source=$RESTORE_VOLUME,target=/restore" \
+  "$HELPER_IMAGE" tar -C /restore -xpf - < "$ARCHIVE"
+```
+
+归档命令失败时应将该输出视为无效文件，不能继续恢复。辅助容器不挂载 Docker socket，也不开放网络端口。恢复后，在只读辅助容器中比较普通文件的 SHA-256、路径、权限和 UID/GID，确认空文件、目录结构与软链接目标；只输出摘要，避免输出节点凭据。再用独立测试容器验证协议配置，切勿自动接入线上网络或复用线上容器名。完成演练后只删除本次创建的测试卷。
+
+隔离合成卷验收已覆盖上述内容及源卷保持不变。测试中的 BusyBox `tar` 保留普通文件时间戳，但不保留目录和软链接时间戳；ACL、扩展属性及其他卷驱动尚未验证，需要这些元数据时应另选支持它们的工具并补充比对。
+
+另已在一次授权的真实部署短暂停机窗口完成数据库导出、源库比对及主数据卷和代理配置卷归档，随后立即重启原主服务；代理容器始终运行。新文件恢复的数据库逻辑摘要一致，两个全新测试卷中的文件摘要、权限和 UID/GID 与归档一致，原管理页面恢复 HTTP 200。测试卷已清理，未启动恢复出的核心；这证明该部署的数据恢复流程可行，不替代其他部署的协议连通性验收。实际 Compose、钩子及镜像和挂载元数据也应独立保存在私有备份目录中。
 
 ## 本地开发与验证
 

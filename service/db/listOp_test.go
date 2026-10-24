@@ -17,15 +17,15 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	db, err = bbolt.Open(filepath.Join(directory, "bolt.db"), 0600, nil)
+	handle, err := bbolt.Open(filepath.Join(directory, "bolt.db"), 0600, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.RemoveAll(directory)
 		os.Exit(1)
 	}
-	once.Do(func() {})
+	database = databaseState{handle: handle, initialized: true}
 	code := m.Run()
-	db.Close()
+	Close()
 	os.RemoveAll(directory)
 	os.Exit(code)
 }

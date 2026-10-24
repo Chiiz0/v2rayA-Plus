@@ -11,9 +11,10 @@ import (
 func init() {
 	conf.RegisterReportType(
 		conf.ReportType{
-			Name: "config",
-			Desc: "print the Report of configs",
-			Func: ConfigReport,
+			Name:       "config",
+			Desc:       "print the Report of configs",
+			Func:       ConfigReport,
+			NoDatabase: true,
 		},
 	)
 }

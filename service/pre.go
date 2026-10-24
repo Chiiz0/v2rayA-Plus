@@ -23,30 +23,22 @@ import (
 	"github.com/v2rayA/v2rayA/core/v2ray/where"
 	"github.com/v2rayA/v2rayA/db"
 	"github.com/v2rayA/v2rayA/db/configure"
-	"github.com/v2rayA/v2rayA/pkg/util/copyfile"
 	"github.com/v2rayA/v2rayA/pkg/util/log"
 	"github.com/v2rayA/v2rayA/server/router"
 	"github.com/v2rayA/v2rayA/server/service"
 
-	confv4 "github.com/v2rayA/v2rayA-lib4/conf"
-
-	touchv4 "github.com/v2rayA/v2rayA-lib4/core/touch"
-
-	configurev4 "github.com/v2rayA/v2rayA-lib4/db/configure"
-
-	servicev4 "github.com/v2rayA/v2rayA-lib4/server/service"
+	"go.etcd.io/bbolt"
 )
 
-func checkEnvironment() {
+func checkEnvironment() (done bool, err error) {
 	config := conf.GetEnvironmentConfig()
 	if len(config.PrintReport) > 0 {
-		db.SetReadOnly()
 		config.Report()
-		os.Exit(0)
+		return true, nil
 	}
 	if !config.PassCheckRoot {
 		if os.Getegid() != 0 {
-			log.Fatal("Please execute this program with sudo or as a root user for the best experience.\n" +
+			return false, fmt.Errorf("Please execute this program with sudo or as a root user for the best experience.\n" +
 				"If you are sure you are root user, use the --passcheckroot parameter to skip the check.\n" +
 				"If you don't want to run as root or you are a non-linux user, use --lite please.\n" +
 				"For example:\n" +
@@ -56,29 +48,30 @@ func checkEnvironment() {
 	}
 	if config.ResetPassword {
 		fmt.Println("Config directory:", config.Config)
-		fmt.Println("Resetting password...\nIf no response for a long time, please stop other v2rayA instances and try again.")
+		fmt.Println("Resetting password...")
 		err := configure.ResetAccounts()
 		if err != nil {
-			log.Fatal("checkEnvironment: %v", err)
+			return false, fmt.Errorf("reset password: %w", err)
 		}
 		fmt.Println("Succeed. It will work after you restart v2rayA.")
-		os.Exit(0)
+		return true, nil
 	}
 	_, v2rayAListeningPort, err := net.SplitHostPort(config.Address)
 	if err != nil {
-		log.Fatal("checkEnvironment: %v", err)
+		return false, fmt.Errorf("listening address: %w", err)
 	}
 	if occupied, sockets, err := ports.IsPortOccupied([]string{v2rayAListeningPort + ":tcp"}); occupied {
 		if err != nil {
-			log.Fatal("netstat: %v", err)
+			return false, fmt.Errorf("netstat: %w", err)
 		}
 		for _, socket := range sockets {
 			process, err := socket.Process()
 			if err == nil {
-				log.Fatal("Port %v is occupied by %v/%v", v2rayAListeningPort, process.Name, process.PID)
+				return false, fmt.Errorf("port %v is occupied by %v/%v", v2rayAListeningPort, process.Name, process.PID)
 			}
 		}
 	}
+	return false, nil
 }
 
 func checkTProxySupportability() {
@@ -99,7 +92,7 @@ func initDBValue() {
 	}
 }
 
-func initConfigure() {
+func initConfigure(legacy *bbolt.DB) {
 	//初始化配置
 	jsonIteratorExtra.RegisterFuzzyDecoders()
 
@@ -107,19 +100,15 @@ func initConfigure() {
 	resolverRecovered := false
 	dbPath := filepath.Join(conf.GetEnvironmentConfig().Config, "bolt.db")
 	if _, e := os.Lstat(dbPath); os.IsNotExist(e) {
-		//confv4.SetConfig(confv4.Params{Config: conf.GetEnvironmentConfig().Config})
-		// need to migrate?
-		if !configurev4.IsConfigureNotExists() {
+		previous, err := readLegacyConfiguration(legacy)
+		if err != nil {
+			log.Fatal("read legacy configuration: %v", err)
+		}
+		if previous != nil {
 			// There is different format in server and subscription.
 			// So we keep other content and reimport servers and subscriptions.
 			log.Warn("Migrating from v4 to main")
-			if err := copyfile.CopyFileContent(filepath.Join(
-				confv4.GetEnvironmentConfig().Config,
-				"boltv4.db",
-			), filepath.Join(
-				conf.GetEnvironmentConfig().Config,
-				"bolt.db",
-			)); err != nil {
+			if err := publishLegacySnapshot(legacy, dbPath); err != nil {
 				log.Fatal("Failed to copy boltv4.db to bolt.db: %v", err)
 			}
 			// Migration imports subscriptions below; restore DNS before those
@@ -131,35 +120,23 @@ func initConfigure() {
 			for _, out := range configure.GetOutbounds() {
 				_ = configure.ClearConnects(out)
 			}
-			var indexes []int
-			for i := 0; i < configurev4.GetLenServers(); i++ {
-				indexes = append(indexes, i)
+			if err := db.Set("touch", "servers", []interface{}{}); err != nil {
+				log.Fatal("prepare legacy servers: %v", err)
 			}
-			_ = configure.RemoveServers(indexes)
-
-			indexes = nil
-			for i := 0; i < configurev4.GetLenSubscriptions(); i++ {
-				indexes = append(indexes, i)
+			if err := db.Set("touch", "subscriptions", []interface{}{}); err != nil {
+				log.Fatal("prepare legacy subscriptions: %v", err)
 			}
-			_ = configure.RemoveSubscriptions(indexes)
 
 			// migrate servers and subscriptions
-			t := touchv4.GenerateTouch()
-			subs := configurev4.GetSubscriptionsV2()
-			for _, sub := range subs {
-				log.Info("Importing subscription: %v", sub.Address)
-				if e := service.Import(sub.Address, nil); e != nil {
-					log.Warn("Failed to migrate subscription: %v", sub.Address)
+			for i, address := range previous.subscriptions {
+				log.Info("Importing legacy subscription %d", i+1)
+				if e := service.Import(address, nil); e != nil {
+					log.Warn("Failed to migrate legacy subscription %d", i+1)
 				}
 			}
-			for iSvr := range t.Servers {
-				if addr, e := servicev4.GetSharingAddress(&configurev4.Which{
-					TYPE: configurev4.ServerType,
-					ID:   iSvr + 1,
-				}); e == nil {
-					if e := service.Import(addr, nil); e != nil {
-						log.Warn("Failed to migrate server: %v", addr)
-					}
+			for i, address := range previous.servers {
+				if e := service.Import(address, nil); e != nil {
+					log.Warn("Failed to migrate legacy server %d", i+1)
 				}
 			}
 
@@ -221,8 +198,8 @@ func initConfigure() {
 }
 
 func recoverResolverOnStartup() {
-	// Opening Bolt obtains the configuration directory's exclusive lock.
-	// A second instance must not restore DNS owned by the running instance.
+	// The directory lock is already held. Also retain Bolt's exclusive lock to
+	// exclude older releases that do not know the directory lock file.
 	_ = db.DB()
 	if err := v2ray.RecoverResolvConf(); err != nil {
 		log.Warn("restore DNS from the previous run: %v", err)
@@ -388,7 +365,6 @@ func run() (err error) {
 		fmt.Println("Quitting...")
 		v2ray.ProcessManager.CheckAndStopTransparentProxy(nil)
 		v2ray.ProcessManager.Stop(false)
-		_ = db.DB().Close()
 	})
 }
 

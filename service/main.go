@@ -1,9 +1,8 @@
 package main
 
 import (
-	"runtime"
-
 	"github.com/gin-gonic/gin"
+	"github.com/v2rayA/v2rayA/conf"
 	_ "github.com/v2rayA/v2rayA/conf/report"
 	_ "github.com/v2rayA/v2rayA/pkg/plugin/juicity"
 	_ "github.com/v2rayA/v2rayA/pkg/plugin/simpleobfs"
@@ -20,14 +19,7 @@ import (
 
 func main() {
 	gin.SetMode(gin.ReleaseMode)
-	checkEnvironment()
-	if runtime.GOOS == "linux" {
-		checkTProxySupportability()
-	}
-	initConfigure()
-	checkUpdate()
-	hello()
-	if err := run(); err != nil {
+	if err := start(conf.GetEnvironmentConfig()); err != nil {
 		log.Fatal("main: %v", err)
 	}
 }

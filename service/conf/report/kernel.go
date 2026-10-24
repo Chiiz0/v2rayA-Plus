@@ -28,9 +28,10 @@ func getKernelRelease() (string, error) {
 func init() {
 	conf.RegisterReportType(
 		conf.ReportType{
-			Name: "kernel",
-			Desc: "print the Report of kernel modules",
-			Func: KernelReport,
+			Name:       "kernel",
+			Desc:       "print the Report of kernel modules",
+			Func:       KernelReport,
+			NoDatabase: true,
 		},
 	)
 }

@@ -14,6 +14,9 @@ type ReportType struct {
 	Name string
 	Desc string
 	Func reportFunc
+	// NoDatabase allows reports that only read configuration or OS metadata
+	// to run without taking the service's configuration-directory lock.
+	NoDatabase bool
 }
 
 var types = map[string]ReportType{}
@@ -38,6 +41,17 @@ func PrintSupportedReports() {
 	}
 	fmt.Println(strings.Join(lines, "\n") + "\n")
 	fmt.Println(`Use "v2raya --report <type>" to print a report.`)
+}
+
+// ReportNeedsDatabase defaults registered reports to database protection.
+// Unknown or empty names only print the supported-report list.
+func (p *Params) ReportNeedsDatabase() bool {
+	fields := strings.Fields(p.PrintReport)
+	if len(fields) == 0 {
+		return false
+	}
+	typ, known := types[fields[0]]
+	return known && !typ.NoDatabase
 }
 
 func (p *Params) Report() {
