@@ -128,6 +128,8 @@ The signature feature of v2rayA-Plus. It allows you to run multiple V2Ray nodes 
 4. The SOCKS5 proxy is now available at `localhost:1085` on the host.
 5. Manage all active proxy containers from the **Docker Proxies** tab in the UI; existing proxies can be edited, paused, resumed, or released.
 
+Deleting nodes or subscriptions used by a Docker proxy is blocked, including front proxy nodes; the error lists the affected ports. Rebind or release those proxies first. Deleting other entries or reordering a subscription keeps stored proxy references on the same nodes. A subscription refresh is rejected if a referenced node disappears, changes configuration, or cannot be uniquely matched; concurrent edits also require retrying the refresh. Paused proxies receive the same protection.
+
 > **Tip**: You can run 10+ nodes simultaneously on different ports with no conflicts.
 
 ---

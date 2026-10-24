@@ -35,10 +35,13 @@ func Import(url string, which *configure.Which) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to resolve addresses: %w", err)
 		}
-		for _, info := range infos {
-			err = configure.AppendServers([]*configure.ServerRaw{{ServerObj: info}})
+		servers := make([]*configure.ServerRaw, len(infos))
+		for i, info := range infos {
+			servers[i] = &configure.ServerRaw{ServerObj: info}
 		}
-		return err
+		nodeOperationMu.Lock()
+		defer nodeOperationMu.Unlock()
+		return configure.AppendServers(servers)
 	}
 	supportedPrefix := []string{"vmess", "vless", "ss", "ssr", "trojan", "trojan-go", "http-proxy",
 		"https-proxy", "socks5", "http2", "juicity", "tuic"}
@@ -51,6 +54,8 @@ func Import(url string, which *configure.Which) (err error) {
 		if err != nil {
 			return
 		}
+		nodeOperationMu.Lock()
+		defer nodeOperationMu.Unlock()
 		if which != nil {
 			// the request is to modify a server
 			ind := which.ID - 1
@@ -120,6 +125,8 @@ func Import(url string, which *configure.Which) (err error) {
 				delete(unique, s)
 			}
 		}
+		nodeOperationMu.Lock()
+		defer nodeOperationMu.Unlock()
 		err = configure.AppendSubscriptions([]*configure.SubscriptionRaw{{
 			Address: source,
 			Status:  string(touch.NewUpdateStatus()),

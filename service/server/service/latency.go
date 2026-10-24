@@ -23,6 +23,8 @@ import (
 const HttpTestURL = "https://gstatic.com/generate_204"
 
 func Ping(which []*configure.Which, timeout time.Duration) (_ []*configure.Which, err error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	var whiches = configure.NewWhiches(which)
 	//对要Ping的which去重
 	which = whiches.GetNonDuplicated()
@@ -94,6 +96,8 @@ func addHosts(tmpl *v2ray.Template, vms []serverObj.ServerObj) {
 }
 
 func TestHttpLatency(which []*configure.Which, timeout time.Duration, maxParallel int, showLog bool, customTestUrl string) ([]*configure.Which, error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	var whiches = configure.NewWhiches(which)
 	for i := len(which) - 1; i >= 0; i-- {
 		if which[i].TYPE == configure.SubscriptionType { //去掉subscriptionType
@@ -295,6 +299,12 @@ func httpLatency(which *configure.Which, port string, timeout time.Duration, cus
 }
 
 func IsSupported(which configure.Which) (bool, error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
+	return isSupportedLocked(which)
+}
+
+func isSupportedLocked(which configure.Which) (bool, error) {
 	var (
 		tmpl *v2ray.Template
 		err  error
@@ -309,7 +319,10 @@ func IsSupported(which configure.Which) (bool, error) {
 		AntiPollution: configure.AntipollutionClosed,
 	})
 	tmpl.SetAPI(nil)
-	serverRaw, _ := which.LocateServerRaw()
+	serverRaw, err := which.LocateServerRaw()
+	if err != nil {
+		return false, err
+	}
 	err = tmpl.InsertMappingOutbound(serverRaw.ServerObj, "0", false, 0, "socks")
 	if err != nil {
 		if strings.Contains(err.Error(), "unsupported") {

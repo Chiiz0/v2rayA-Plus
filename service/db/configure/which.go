@@ -3,6 +3,7 @@ package configure
 import (
 	"fmt"
 	"github.com/v2rayA/v2rayA/common/resolv"
+	"github.com/v2rayA/v2rayA/db"
 	"github.com/v2rayA/v2rayA/pkg/util/log"
 	"net"
 	"sort"
@@ -210,20 +211,37 @@ func (w *Which) Ping(timeout time.Duration) (err error) {
 }
 
 func (w *Which) LocateServerRaw() (sr *ServerRaw, err error) {
+	if w == nil {
+		return nil, fmt.Errorf("LocateServerRaw: nil reference")
+	}
+	if w.ID <= 0 || w.TYPE == SubscriptionServerType && w.Sub < 0 {
+		return nil, fmt.Errorf("LocateServerRaw: ID or Sub exceed range")
+	}
 	ind := w.ID - 1 //转化为下标
 	switch w.TYPE {
 	case ServerType:
-		servers := GetServers()
-		if ind < 0 || ind >= len(servers) {
-			return nil, fmt.Errorf("LocateServerRaw: ID exceed range")
+		raw, err := db.ListGet("touch", "servers", ind)
+		if err != nil {
+			return nil, err
 		}
-		return &servers[ind], nil
+		return decodeReferenceServerRaw(raw)
 	case SubscriptionServerType:
-		subscriptions := GetSubscriptions()
-		if w.Sub < 0 || w.Sub >= len(subscriptions) || ind < 0 || ind >= len(subscriptions[w.Sub].Servers) {
+		raw, err := db.ListGet("touch", "subscriptions", w.Sub)
+		if err != nil {
+			return nil, err
+		}
+		object, err := readReferenceObject(raw, "subscription")
+		if err != nil {
+			return nil, err
+		}
+		servers, err := readReferenceList(object["servers"], "subscription servers")
+		if err != nil {
+			return nil, err
+		}
+		if ind < 0 || ind >= len(servers) {
 			return nil, fmt.Errorf("LocateServerRaw: ID or Sub exceed range")
 		}
-		return &subscriptions[w.Sub].Servers[ind], nil
+		return decodeReferenceServerRaw(servers[ind])
 	default:
 		return nil, fmt.Errorf("LocateServerRaw: invalid TYPE")
 	}

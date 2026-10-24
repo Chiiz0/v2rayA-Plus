@@ -245,38 +245,37 @@ func hello() {
 }
 
 func updateSubscriptions() {
-	subs := configure.GetSubscriptions()
-	lenSubs := len(subs)
-	control := make(chan struct{}, 2) //并发限制同时更新2个订阅
-	// Disconnect from subscriptions before auto-selecting servers from them
-	// to limit the number of connected servers and avoid hitting the limit
-	shouldDisconnect := true
-	err := service.AutoSelectServersFromSubscriptions(shouldDisconnect)
+	snapshots, err := service.SnapshotSubscriptionsForUpdate()
 	if err != nil {
+		log.Error("[AutoUpdate] Failed to snapshot subscriptions: %v", err)
+		return
+	}
+	control := make(chan struct{}, 2)
+	// Disconnect from subscriptions before auto-selecting servers from them
+	// to limit the number of connected servers and avoid hitting the limit.
+	if err := service.AutoSelectServersFromSubscriptions(true); err != nil {
 		log.Error("[AutoSelect] Failed to disconnect servers from subscriptions -- err: %v", err)
 	}
 	wg := new(sync.WaitGroup)
-	for i := 0; i < lenSubs; i++ {
+	for _, snapshot := range snapshots {
 		wg.Add(1)
-		go func(i int) {
+		go func(snapshot service.SubscriptionUpdateSnapshot) {
+			defer wg.Done()
 			control <- struct{}{}
-			err := service.UpdateSubscription(i, false)
-			if err != nil {
-				log.Info("[AutoUpdate] Subscriptions: Failed to update subscription -- ID: %d，err: %v", i, err)
+			defer func() { <-control }()
+			// The raw snapshot is checked again at commit. A deletion, edit or
+			// another refresh while this job waits must not retarget its index.
+			if err := service.UpdateSubscriptionSnapshot(snapshot.Index, snapshot.Raw, false); err != nil {
+				log.Info("[AutoUpdate] Subscriptions: Failed to update subscription -- ID: %d, Address: %s, err: %v", snapshot.Index, snapshot.Address, err)
 			} else {
-				log.Info("[AutoUpdate] Subscriptions: Complete updating subscription -- ID: %d，Address: %s", i, subs[i].Address)
+				log.Info("[AutoUpdate] Subscriptions: Complete updating subscription -- ID: %d, Address: %s", snapshot.Index, snapshot.Address)
 			}
-			wg.Done()
-			<-control
-		}(i)
+		}(snapshot)
 	}
 	wg.Wait()
-	shouldDisconnect = false
-	err2 := service.AutoSelectServersFromSubscriptions(shouldDisconnect)
-	if err2 != nil {
-		log.Error("[AutoSelect] Failed to auto-select servers from subscriptions -- err: %v", err2)
+	if err := service.AutoSelectServersFromSubscriptions(false); err != nil {
+		log.Error("[AutoSelect] Failed to auto-select servers from subscriptions -- err: %v", err)
 	}
-
 }
 
 func initUpdatingTicker() {

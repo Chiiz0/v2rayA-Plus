@@ -290,22 +290,21 @@ func findAvailablePluginPorts(vms []serverObj.ServerObj) (pluginPortMap map[int]
 }
 
 func getConnectedServerObjs() ([]serverObj.ServerObj, []serverInfo, error) {
-	css := configure.GetConnectedServers()
-	if css.Len() == 0 { //no connected server. stop v2ray-core.
+	nodes, err := configure.ReadConnectedServerSnapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(nodes) == 0 { //no connected server. stop v2ray-core.
 		return nil, nil, nil
 	}
-	serverInfos := make([]serverInfo, 0, css.Len())
-	serverObjs := make([]serverObj.ServerObj, 0, css.Len())
-	for _, cs := range css.Get() {
-		sr, err := cs.LocateServerRaw()
-		if err != nil {
-			return nil, nil, err
-		}
+	serverInfos := make([]serverInfo, 0, len(nodes))
+	serverObjs := make([]serverObj.ServerObj, 0, len(nodes))
+	for _, node := range nodes {
 		serverInfos = append(serverInfos, serverInfo{
-			Info:         sr.ServerObj,
-			OutboundName: cs.Outbound,
+			Info:         node.Server.ServerObj,
+			OutboundName: node.Which.Outbound,
 		})
-		serverObjs = append(serverObjs, sr.ServerObj)
+		serverObjs = append(serverObjs, node.Server.ServerObj)
 	}
 	return serverObjs, serverInfos, nil
 }

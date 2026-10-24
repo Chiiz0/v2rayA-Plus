@@ -30,21 +30,23 @@ type DockerProxy struct {
 
 func GetDockerProxies() ([]DockerProxy, error) {
 	var list []DockerProxy
-	err := db.Transaction(db.DB(), func(tx *bbolt.Tx) (bool, error) {
-		dirty := false
-		bkt, err := db.CreateBucketIfNotExists(tx, []byte("dockerProxies"), &dirty)
-		if err != nil {
-			return dirty, err
+	err := db.DB().View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket([]byte("dockerProxies"))
+		if bkt == nil {
+			return nil
 		}
-		err = bkt.ForEach(func(k, v []byte) error {
-			var dp DockerProxy
-			if err := json.Unmarshal(v, &dp); err == nil {
-				list = append(list, dp)
+		return bkt.ForEach(func(k, v []byte) error {
+			dp, err := decodeDockerProxy(k, v)
+			if err != nil {
+				return err
 			}
+			list = append(list, dp)
 			return nil
 		})
-		return dirty, err
 	})
+	if err != nil {
+		return nil, err
+	}
 	return list, err
 }
 

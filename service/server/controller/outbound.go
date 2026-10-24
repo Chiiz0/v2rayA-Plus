@@ -1,10 +1,8 @@
 package controller
 
 import (
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/v2rayA/v2rayA/common"
-	"github.com/v2rayA/v2rayA/core/v2ray"
 	"github.com/v2rayA/v2rayA/db/configure"
 	"github.com/v2rayA/v2rayA/server/service"
 )
@@ -24,7 +22,7 @@ func PostOutbound(ctx *gin.Context) {
 		common.ResponseError(ctx, logError("bad request"))
 		return
 	}
-	if err := configure.AddOutbound(data.Outbound); err != nil {
+	if err := service.AddOutbound(data.Outbound); err != nil {
 		common.ResponseError(ctx, logError(err))
 		return
 	}
@@ -47,15 +45,9 @@ func PutOutbound(ctx *gin.Context) {
 		common.ResponseError(ctx, logError("bad request"))
 		return
 	}
-	if err := configure.SetOutboundSetting(data.Outbound, data.Setting); err != nil {
+	if err := service.UpdateOutboundSetting(data.Outbound, data.Setting); err != nil {
 		common.ResponseError(ctx, logError(err))
 		return
-	}
-	if v2ray.ProcessManager.Running() && configure.GetConnectedServers().Len() > 0 {
-		err := v2ray.UpdateV2RayConfig()
-		if err != nil {
-			common.ResponseError(ctx, fmt.Errorf("invalid config: %w", err))
-		}
 	}
 	common.ResponseSuccess(ctx, nil)
 }
@@ -86,13 +78,7 @@ func DeleteOutbound(ctx *gin.Context) {
 		common.ResponseError(ctx, logError("outbound \"proxy\" cannot be deleted"))
 		return
 	}
-	if w := configure.GetConnectedServersByOutbound(data.Outbound); w != nil {
-		if err := service.Disconnect(configure.Which{Outbound: data.Outbound}, true); err != nil {
-			common.ResponseError(ctx, logError(err))
-			return
-		}
-	}
-	if err := configure.RemoveOutbound(data.Outbound); err != nil {
+	if err := service.DeleteOutbound(data.Outbound); err != nil {
 		common.ResponseError(ctx, logError(err))
 		return
 	}

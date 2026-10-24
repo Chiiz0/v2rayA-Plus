@@ -15,6 +15,8 @@ func GetPorts() configure.Ports {
 }
 
 func SetPorts(ports *configure.Ports) (err error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	origin := GetPorts()
 	set := map[int]struct{}{}
 	cnt := 0

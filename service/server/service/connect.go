@@ -16,10 +16,14 @@ import (
 var V2OnlyFeatureError = fmt.Errorf("v2fly/v2ray-core only feature")
 
 func StopV2ray() (err error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	v2ray.ProcessManager.Stop(true)
 	return nil
 }
 func StartV2ray() (err error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	if err = checkSupport(nil); err != nil {
 		return err
 	}
@@ -38,6 +42,12 @@ func StartV2ray() (err error) {
 }
 
 func Disconnect(which configure.Which, clearOutbound bool) (err error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
+	return disconnectLocked(which, clearOutbound)
+}
+
+func disconnectLocked(which configure.Which, clearOutbound bool) (err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("failed to disconnect: %w", err)
@@ -101,6 +111,12 @@ func checkSupport(toAppend []*configure.Which) (err error) {
 }
 
 func Connect(which *configure.Which) (err error) {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
+	return connectLocked(which)
+}
+
+func connectLocked(which *configure.Which) (err error) {
 	log.Trace("Connect: begin")
 	defer log.Trace("Connect: done")
 	defer func() {
@@ -110,6 +126,9 @@ func Connect(which *configure.Which) (err error) {
 	}()
 	if which == nil {
 		return fmt.Errorf("which can not be nil")
+	}
+	if _, err := which.LocateServerRaw(); err != nil {
+		return err
 	}
 	setting := GetSetting()
 	if err = checkSupport([]*configure.Which{which}); err != nil {

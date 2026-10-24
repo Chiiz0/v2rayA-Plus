@@ -19,7 +19,6 @@ import (
 	"github.com/v2rayA/v2rayA/core/serverObj"
 	"github.com/v2rayA/v2rayA/core/v2ray/where"
 	"github.com/v2rayA/v2rayA/db/configure"
-	"github.com/v2rayA/v2rayA/pkg/util/log"
 	"golang.org/x/mod/semver"
 )
 
@@ -75,8 +74,18 @@ type dockerProxyCoreRuntime struct {
 }
 
 func runDockerCmd(args ...string) (string, error) {
-	cmd := exec.Command("docker", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	return runDockerCmdContext(ctx, args...)
+}
+
+func runDockerCmdContext(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.WaitDelay = 3 * time.Second
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return string(out), fmt.Errorf("docker command failed: %w", ctx.Err())
+	}
 	if err != nil {
 		return string(out), fmt.Errorf("docker command failed: %w (output: %s)", err, string(out))
 	}
@@ -84,16 +93,38 @@ func runDockerCmd(args ...string) (string, error) {
 }
 
 func writeConfigToVolume(volumeName string, configBytes []byte) error {
-	cmd := exec.Command(
-		"docker", "run", "--rm", "-i",
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	return writeConfigToVolumeContext(ctx, volumeName, configBytes)
+}
+
+func writeConfigToVolumeContext(ctx context.Context, volumeName string, configBytes []byte) error {
+	helperName := fmt.Sprintf("v2raya-config-write-%d-%d", os.Getpid(), time.Now().UnixNano())
+	defer func() {
+		// Canceling the Docker CLI does not stop its container. Only remove
+		// this write helper, using a fresh deadline after the request expires.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		cleanup := exec.CommandContext(cleanupCtx, "docker", "rm", "-f", helperName)
+		cleanup.WaitDelay = 3 * time.Second
+		_ = cleanup.Run()
+	}()
+	cmd := exec.CommandContext(
+		ctx, "docker", "run", "--rm", "--name", helperName, "-i",
 		"--network", "none",
 		"-v", volumeName+":/data",
 		"alpine", "sh", "-c", "cat > /data/config.json",
 	)
+	cmd.WaitDelay = 3 * time.Second
 	cmd.Stdin = bytes.NewReader(configBytes)
-	out, err := cmd.CombinedOutput()
+	// Docker diagnostics can echo the configuration received on stdin.
+	// Never return or log them because the configuration contains credentials.
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return fmt.Errorf("failed to write config to volume: %w", ctx.Err())
+	}
 	if err != nil {
-		return fmt.Errorf("failed to write config to volume: %w (output: %s)", err, string(out))
+		return fmt.Errorf("failed to write config to volume: %w", err)
 	}
 	return nil
 }
@@ -534,11 +565,16 @@ func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolu
 }
 
 func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port int, core configure.DockerProxyCore) error {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	if err := validateDockerProxy(port, which, frontWhich); err != nil {
 		return err
 	}
 
-	proxies, _ := configure.GetDockerProxies()
+	proxies, err := configure.GetDockerProxies()
+	if err != nil {
+		return err
+	}
 	for _, p := range proxies {
 		if p.Port == port {
 			return fmt.Errorf("port %d is already used by another docker proxy", port)
@@ -546,6 +582,9 @@ func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port 
 	}
 
 	occupied, _, err := ports.IsPortOccupied([]string{strconv.Itoa(port) + ":tcp"})
+	if err != nil {
+		return err
+	}
 	if occupied {
 		return fmt.Errorf("port %d is already occupied on the host", port)
 	}
@@ -570,13 +609,15 @@ func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port 
 	}
 	err = configure.SaveDockerProxy(proxy)
 	if err != nil {
-		log.Error("failed to save docker proxy to db: %v", err)
+		return fmt.Errorf("Docker proxy started, but failed to save its references: %w", err)
 	}
 
 	return nil
 }
 
 func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Which, core configure.DockerProxyCore) error {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	if err := validateDockerProxy(port, which, frontWhich); err != nil {
 		return err
 	}
@@ -622,6 +663,8 @@ func UpdateDockerProxy(port int, which configure.Which, frontWhich *configure.Wh
 }
 
 func PauseDockerProxy(port int) error {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	proxy, ok, err := findDockerProxy(port)
 	if err != nil {
 		return err
@@ -640,6 +683,8 @@ func PauseDockerProxy(port int) error {
 }
 
 func ResumeDockerProxy(port int) error {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	proxy, ok, err := findDockerProxy(port)
 	if err != nil {
 		return err
@@ -719,6 +764,8 @@ func GetDockerProxies() ([]configure.DockerProxy, error) {
 }
 
 func DeleteDockerProxy(port int) error {
+	nodeOperationMu.Lock()
+	defer nodeOperationMu.Unlock()
 	containerName := fmt.Sprintf("v2raya-socks-%d", port)
 	volumeName := fmt.Sprintf("v2raya-socks-%d", port)
 
