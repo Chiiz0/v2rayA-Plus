@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/v2rayA/v2rayA/common/resolv"
 	"github.com/v2rayA/v2rayA/conf"
 	"github.com/v2rayA/v2rayA/core/specialMode"
 	"github.com/v2rayA/v2rayA/core/v2ray/asset"
@@ -20,9 +19,23 @@ type CoreProcessManager struct {
 }
 
 var ProcessManager CoreProcessManager
+var newCoreProcess = NewProcess
+var cleanupFailedCoreStart = func() {
+	// Startup hooks may have failed after host state was installed. Roll
+	// back directly so another failing hook cannot interrupt the cleanup.
+	removeResolvHijacker()
+	deleteTransparentProxyRules()
+	specialMode.StopDNSSupervisor()
+}
 
 func (m *CoreProcessManager) beforeStop(p *Process) {
-	m.CheckAndStopTransparentProxy(p.template.Setting)
+	setting := p.template.Setting
+	if setting == nil {
+		// Callers can hold m.mu, so do not let the public stop method try
+		// to retrieve the running template by taking the same lock again.
+		setting = configure.GetSettingNotNil()
+	}
+	m.CheckAndStopTransparentProxy(setting)
 	specialMode.StopDNSSupervisor()
 
 	if corehook := conf.GetEnvironmentConfig().CoreHook; corehook != "" {
@@ -50,6 +63,11 @@ func (m *CoreProcessManager) GetRunningTemplate() *Template {
 }
 
 func (m *CoreProcessManager) CheckAndSetupTransparentProxy(checkRunning bool, setting *configure.Setting) (err error) {
+	defer func() {
+		if err != nil {
+			removeResolvHijacker()
+		}
+	}()
 	if setting != nil {
 		setting.FillEmpty()
 	} else {
@@ -96,6 +114,8 @@ func (m *CoreProcessManager) CheckAndSetupTransparentProxy(checkRunning bool, se
 }
 
 func (m *CoreProcessManager) CheckAndStopTransparentProxy(setting *configure.Setting) {
+	// Restore even if the core never finished starting or a stop hook fails.
+	defer removeResolvHijacker()
 	if setting == nil {
 		if t := m.GetRunningTemplate(); t != nil {
 			setting = t.Setting
@@ -172,6 +192,7 @@ func (m *CoreProcessManager) Stop(saveRunning bool) {
 
 func (m *CoreProcessManager) stop(saveRunning bool) {
 	if m.p == nil {
+		removeResolvHijacker()
 		return
 	}
 
@@ -191,8 +212,6 @@ func (m *CoreProcessManager) stop(saveRunning bool) {
 }
 
 func (m *CoreProcessManager) beforeStart(t *Template) (err error) {
-	resolv.CheckResolvConf()
-
 	if (t.Setting.Transparent == configure.TransparentGfwlist || t.Setting.RulePortMode == configure.GfwlistMode) && !asset.DoesV2rayAssetExist("LoyalsoldierSite.dat") {
 		return fmt.Errorf("cannot find GFWList files. update GFWList and try again")
 	}
@@ -243,15 +262,15 @@ func (m *CoreProcessManager) Start(t *Template) (err error) {
 
 	m.stop(true)
 
-	process, err := NewProcess(t, func() error {
+	process, err := newCoreProcess(t, func() error {
 		return m.beforeStart(t)
 	}, func() error {
 		return m.afterStart(t)
-	}, func(p *Process) {
-		m.beforeStop(p)
-		m.afterStop(p)
-	})
+	}, m.handleUnexpectedStop)
 	if err != nil {
+		// afterStart can install the hijacker before a post-start hook or
+		// readiness check fails, while m.p has not been assigned yet.
+		cleanupFailedCoreStart()
 		return err
 	}
 	m.p = process
@@ -263,6 +282,18 @@ func (m *CoreProcessManager) Start(t *Template) (err error) {
 
 	configure.SetRunning(true)
 	return nil
+}
+
+func (m *CoreProcessManager) handleUnexpectedStop(p *Process) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// An old process can finish waiting after a replacement has started.
+	// Only the current owner may remove the host's proxy and DNS state.
+	if m.p != p {
+		return
+	}
+	m.beforeStop(p)
+	m.afterStop(p)
 }
 
 // Running reports if v2ray-core is running.

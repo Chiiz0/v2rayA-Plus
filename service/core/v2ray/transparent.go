@@ -82,7 +82,9 @@ func writeTransparentProxyRules() (err error) {
 			if e != nil {
 				log.Warn("only listen at 127.2.0.17: %v", e)
 			}
-			resetResolvHijacker()
+			if err = resetResolvHijacker(); err != nil {
+				return fmt.Errorf("cannot safely intercept DNS: %w", err)
+			}
 		} else if specialMode.ShouldUseFakeDns() {
 			return fmt.Errorf("fakedns cannot be enabled: %w", e)
 		} else {

@@ -185,6 +185,13 @@ v2rayA-Plus/
 ### IP Forwarding
 IP Forward (`/proc/sys/net/ipv4/ip_forward`) is only written to `1` when explicitly enabled in settings. When disabled, the host system value is **never modified**, preventing disruption to Docker's own networking.
 
+### DNS Recovery
+Before redirect-mode DNS interception, the original `resolv.conf` content and permissions, symlink, or missing-file state are saved in `resolv.conf.v2raya_backup` inside the persistent configuration directory. Interception stops if the backup cannot be saved. Normal shutdown and failed startup restore the original; after an abnormal exit, the next startup attempts recovery even when the proxy is not set to start automatically. Failed restoration retains the backup and logs the error. Symlink targets are never overwritten by interception or restoration.
+
+The supplied Compose files and installer do not mount the host's `/etc/resolv.conf`. Remove that mount from older or custom deployments before upgrading. If an older version already overwrote the original without a backup, recover it from your system's DNS manager or a known original configuration; the program cannot reconstruct the lost contents. Keep the configuration volume when recreating the container so recovery data remains available.
+
+Developers can run `scripts/test-resolv-docker.sh` to verify file bind mounts and recovery across fresh containers using temporary files and an isolated network.
+
 ### Core Selection and Docker Proxy Images
 The main image bundles V2Fly and Xray, selected through `V2RAYA_CORE`. Each Docker proxy can independently select Auto, V2Fly, or Xray. Auto follows the main service core. V2Fly uses the image tag matching the running version (for example, `v2fly/v2fly-core:v5.41.0`) and falls back to `latest` when unavailable. Xray uses `teddysun/xray:latest`.
 

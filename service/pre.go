@@ -104,6 +104,7 @@ func initConfigure() {
 	jsonIteratorExtra.RegisterFuzzyDecoders()
 
 	//db
+	resolverRecovered := false
 	dbPath := filepath.Join(conf.GetEnvironmentConfig().Config, "bolt.db")
 	if _, e := os.Lstat(dbPath); os.IsNotExist(e) {
 		//confv4.SetConfig(confv4.Params{Config: conf.GetEnvironmentConfig().Config})
@@ -121,6 +122,10 @@ func initConfigure() {
 			)); err != nil {
 				log.Fatal("Failed to copy boltv4.db to bolt.db: %v", err)
 			}
+			// Migration imports subscriptions below; restore DNS before those
+			// network requests or their missing-resolver checks can run.
+			recoverResolverOnStartup()
+			resolverRecovered = true
 
 			// clear connects of outbounds
 			for _, out := range configure.GetOutbounds() {
@@ -162,6 +167,9 @@ func initConfigure() {
 		} else {
 			initDBValue()
 		}
+	}
+	if !resolverRecovered {
+		recoverResolverOnStartup()
 	}
 
 	if len(configure.GetTproxyWhiteIpGroups().CountryCodes) == 0 {
@@ -209,6 +217,15 @@ func initConfigure() {
 			}
 			log.Alert("geoip.dat and geosite.dat are ready")
 		}
+	}
+}
+
+func recoverResolverOnStartup() {
+	// Opening Bolt obtains the configuration directory's exclusive lock.
+	// A second instance must not restore DNS owned by the running instance.
+	_ = db.DB()
+	if err := v2ray.RecoverResolvConf(); err != nil {
+		log.Warn("restore DNS from the previous run: %v", err)
 	}
 }
 
@@ -368,12 +385,18 @@ func run() (err error) {
 		<-sigs
 		errch <- nil
 	}()
-	if err = <-errch; err != nil {
-		log.Fatal("run: %v", err)
+	return waitForShutdown(errch, func() {
+		fmt.Println("Quitting...")
+		v2ray.ProcessManager.CheckAndStopTransparentProxy(nil)
+		v2ray.ProcessManager.Stop(false)
+		_ = db.DB().Close()
+	})
+}
+
+func waitForShutdown(errch <-chan error, cleanup func()) error {
+	defer cleanup()
+	if err := <-errch; err != nil {
+		return fmt.Errorf("run: %w", err)
 	}
-	fmt.Println("Quitting...")
-	v2ray.ProcessManager.CheckAndStopTransparentProxy(nil)
-	v2ray.ProcessManager.Stop(false)
-	_ = db.DB().Close()
 	return nil
 }

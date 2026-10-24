@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -38,7 +39,7 @@ type Process struct {
 func NewProcess(tmpl *Template,
 	prestart func() error, poststart func() error,
 	postUnexpectedStop func(p *Process),
-) (*Process, error) {
+) (_ *Process, err error) {
 	process := &Process{
 		template: tmpl,
 	}
@@ -51,7 +52,7 @@ func NewProcess(tmpl *Template,
 		}
 		process.tag2WhichIndex = tag2WhichIndex
 	}
-	err := WriteV2rayConfig(tmpl.ToConfigBytes())
+	err = WriteV2rayConfig(tmpl.ToConfigBytes())
 	if err != nil {
 		return nil, err
 	}
@@ -103,17 +104,18 @@ func NewProcess(tmpl *Template,
 	if err != nil {
 		return nil, err
 	}
-	if err = poststart(); err != nil {
-		return nil, err
-	}
 	process.proc = proc
-	var unexpectedExiting bool
+	var unexpectedExiting atomic.Bool
+	// Reap the core even when poststart fails. The manager serializes the
+	// callback and checks ownership before cleaning up host state.
 	go func() {
 		p, e := proc.Wait()
-		if process.procCancel == nil {
-			// canceled by v2rayA
+		if pCtx.Err() != nil {
+			// A normal stop or failed startup already owns the cleanup. Avoid
+			// a late callback restoring DNS installed by the next process.
 			return
 		}
+		unexpectedExiting.Store(true)
 		defer postUnexpectedStop(process)
 		var t []string
 		if p != nil {
@@ -126,8 +128,10 @@ func NewProcess(tmpl *Template,
 			t = append(t, e.Error())
 		}
 		log.Warn("v2ray-core: %v", strings.Join(t, ": "))
-		unexpectedExiting = true
 	}()
+	if err = poststart(); err != nil {
+		return nil, err
+	}
 	// ports to check
 	portList := []string{strconv.Itoa(tmpl.ApiPort)}
 	for _, plu := range tmpl.Plugins {
@@ -147,7 +151,7 @@ func NewProcess(tmpl *Template,
 			i++
 			continue
 		}
-		if unexpectedExiting {
+		if unexpectedExiting.Load() {
 			if log.Log.GetLevel() > log.ParseLevel("info") {
 				log.Error("some critical information may lost due to your log level")
 			}
