@@ -1162,7 +1162,12 @@
       <button class="button" type="button" @click="$parent.close()">
         {{ $t("operations.cancel") }}
       </button>
-      <button class="button is-primary" @click="handleClickSubmit">
+      <button
+        class="button is-primary"
+        :class="{ 'is-loading': serverLoading || submitting }"
+        :disabled="!canSubmit"
+        @click="handleClickSubmit"
+      >
         {{ $t("operations.saveApply") }}
       </button>
     </footer>
@@ -1186,8 +1191,15 @@ export default {
       type: Boolean,
       default: false,
     },
+    submitting: {
+      type: Boolean,
+      default: false,
+    },
   },
   data: () => ({
+    editorActive: true,
+    serverLoading: false,
+    serverLoaded: false,
     vlessVersion: 0,
     v2ray: {
       ps: "",
@@ -1303,80 +1315,154 @@ export default {
     },
     tabChoice: 0,
   }),
+  computed: {
+    canSubmit() {
+      return (
+        this.editorActive &&
+        !this.readonly &&
+        !this.serverLoading &&
+        this.serverLoaded &&
+        !this.submitting
+      );
+    },
+  },
+  beforeDestroy() {
+    this.editorActive = false;
+  },
   mounted() {
     if (this.which !== null) {
-      this.$axios({
+      this.serverLoading = true;
+      return this.$axios({
         url: apiRoot + "/sharingAddress",
         method: "get",
         params: {
           touch: this.which,
         },
-      }).then((res) => {
-        handleResponse(res, this, () => {
-          if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("vmess://") ||
-            res.data.data.sharingAddress.toLowerCase().startsWith("vless://")
-          ) {
-            this.v2ray = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 0;
-          } else if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("ss://")
-          ) {
-            this.ss = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 1;
-          } else if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("ssr://")
-          ) {
-            this.ssr = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 2;
-          } else if (
-            res.data.data.sharingAddress
-              .toLowerCase()
-              .startsWith("trojan://") ||
-            res.data.data.sharingAddress
-              .toLowerCase()
-              .startsWith("trojan-go://")
-          ) {
-            this.trojan = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 3;
-          } else if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("juicity://")
-          ) {
-            this.juicity = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 4;
-          } else if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("tuic://")
-          ) {
-            this.tuic = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 5;
-          } else if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("http://") ||
-            res.data.data.sharingAddress.toLowerCase().startsWith("https://")
-          ) {
-            this.http = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 6;
-          } else if (
-            res.data.data.sharingAddress.toLowerCase().startsWith("socks5://")
-          ) {
-            this.socks5 = this.resolveURL(res.data.data.sharingAddress);
-            this.tabChoice = 7;
+      })
+        .then((res) => {
+          if (!this.editorActive) {
+            return;
           }
-          this.$nextTick(() => {
-            if (this.readonly) {
-              this.$refs.section
-                .querySelectorAll("input, textarea")
-                .forEach((x) => (x.readOnly = "readOnly"));
-              this.$refs.section.querySelectorAll("select").forEach((x) => {
-                const text = x.querySelector(
-                  `option[value="${x.value}"]`
-                ).textContent;
-                console.log(x.value, text);
-                x.outerHTML = `<input type="text" class="input" readonly="readonly" value="${text}">`;
+          handleResponse(
+            res,
+            this,
+            () => {
+              if (typeof res.data.data?.sharingAddress !== "string") {
+                throw new Error(
+                  this.$t("configureServer.invalidSharingAddress")
+                );
+              }
+              if (
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("vmess://") ||
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("vless://")
+              ) {
+                this.v2ray = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 0;
+              } else if (
+                res.data.data.sharingAddress.toLowerCase().startsWith("ss://")
+              ) {
+                this.ss = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 1;
+              } else if (
+                res.data.data.sharingAddress.toLowerCase().startsWith("ssr://")
+              ) {
+                this.ssr = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 2;
+              } else if (
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("trojan://") ||
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("trojan-go://")
+              ) {
+                this.trojan = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 3;
+              } else if (
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("juicity://")
+              ) {
+                this.juicity = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 4;
+              } else if (
+                res.data.data.sharingAddress.toLowerCase().startsWith("tuic://")
+              ) {
+                this.tuic = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 5;
+              } else if (
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("http://") ||
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("https://")
+              ) {
+                this.http = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 6;
+              } else if (
+                res.data.data.sharingAddress
+                  .toLowerCase()
+                  .startsWith("socks5://")
+              ) {
+                this.socks5 = this.resolveURL(res.data.data.sharingAddress);
+                this.tabChoice = 7;
+              } else {
+                throw new Error(
+                  this.$t("configureServer.invalidSharingAddress")
+                );
+              }
+              this.serverLoaded = true;
+              this.$nextTick(() => {
+                if (!this.editorActive) {
+                  return;
+                }
+                if (this.readonly) {
+                  this.$refs.section
+                    .querySelectorAll("input, textarea")
+                    .forEach((x) => (x.readOnly = "readOnly"));
+                  this.$refs.section.querySelectorAll("select").forEach((x) => {
+                    const text = x.querySelector(
+                      `option[value="${x.value}"]`
+                    ).textContent;
+                    console.log(x.value, text);
+                    x.outerHTML = `<input type="text" class="input" readonly="readonly" value="${text}">`;
+                  });
+                }
               });
+            },
+            () => {
+              throw new Error(res.data?.message || this.$t("common.fail"));
             }
+          );
+        })
+        .catch((err) => {
+          if (!this.editorActive) {
+            return;
+          }
+          this.serverLoaded = false;
+          this.$buefy.toast.open({
+            message: this.$t("configureServer.loadFailed", {
+              message: err.response?.data?.message || err.message,
+            }),
+            type: "is-danger",
+            position: "is-top",
+            queue: false,
+            duration: 5000,
           });
+          this.$parent.close();
+        })
+        .finally(() => {
+          if (this.editorActive) {
+            this.serverLoading = false;
+          }
         });
-      });
+    } else {
+      this.serverLoaded = true;
     }
   },
   methods: {
@@ -1396,6 +1482,9 @@ export default {
         obj.scy = obj.scy || "auto";
         obj.encryption = "none";
         obj.protocol = obj.protocol || "vmess";
+        if (String(obj.net).toLowerCase() === "raw") {
+          obj.net = "tcp";
+        }
         return obj;
       } else if (url.toLowerCase().startsWith("vless://")) {
         let u = parseURL(url);
@@ -1424,6 +1513,9 @@ export default {
           xhttpRawJson: u.params.xhttpRawJson || "",
           protocol: "vless",
         };
+        if (o.net.toLowerCase() === "raw") {
+          o.net = "tcp";
+        }
         if (o.alpn !== "") {
           o.alpn = decodeURIComponent(o.alpn);
         }
@@ -1889,6 +1981,9 @@ export default {
       }
     },
     async handleClickSubmit() {
+      if (!this.canSubmit) {
+        return;
+      }
       let valid = true;
       for (let k in this.$refs) {
         if (!Object.prototype.hasOwnProperty.call(this.$refs, k)) {
@@ -1971,7 +2066,9 @@ export default {
       } else if (this.tabChoice === 7) {
         coded = this.generateURL(this.socks5);
       }
-      this.$emit("submit", coded);
+      if (this.canSubmit) {
+        this.$emit("submit", coded);
+      }
     },
   },
 };

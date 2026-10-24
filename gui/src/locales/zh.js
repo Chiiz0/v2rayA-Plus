@@ -244,6 +244,8 @@ export default {
   },
   configureServer: {
     title: "配置节点 | 节点",
+    loadFailed: "节点加载失败，编辑器已关闭以保护原配置。{message}",
+    invalidSharingAddress: "服务端返回了无效或不支持的节点链接。",
     servername: "节点名称",
     port: "端口号",
     forceTLS: "强制开启TLS",

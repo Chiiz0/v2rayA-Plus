@@ -729,8 +729,11 @@
       aria-modal
     >
       <ModalServer
+        v-if="showModalServer"
+        :key="modalServerSession"
         :which="which"
         :readonly="modalServerReadOnly"
+        :submitting="modalServerSubmitting"
         @submit="handleModalServerSubmit"
       />
     </b-modal>
@@ -1028,6 +1031,8 @@ export default {
       showModalServer: false,
       which: null,
       modalServerReadOnly: false,
+      modalServerSubmitting: false,
+      modalServerSession: 0,
       showModalSubscription: false,
       showModalDockerProxy: false,
       dockerProxyEditing: false,
@@ -1905,21 +1910,32 @@ export default {
     handleClickCreate() {
       this.modalServerReadOnly = false;
       this.which = null;
+      this.modalServerSession++;
+      this.modalServerSubmitting = false;
       this.showModalServer = true;
     },
     handleClickModifyServer(row) {
       this.modalServerReadOnly = false;
       this.which = Object.assign({}, row);
       this.which.servers = [];
+      this.modalServerSession++;
+      this.modalServerSubmitting = false;
       this.showModalServer = true;
     },
     handleClickViewServer(row, sub) {
       this.modalServerReadOnly = true;
       this.which = { ...row, sub };
+      this.modalServerSession++;
+      this.modalServerSubmitting = false;
       this.showModalServer = true;
     },
     handleModalServerSubmit(url) {
-      this.$axios({
+      if (this.modalServerSubmitting) {
+        return;
+      }
+      const session = this.modalServerSession;
+      this.modalServerSubmitting = true;
+      return this.$axios({
         url: apiRoot + "/import",
         method: "post",
         data: {
@@ -1927,20 +1943,41 @@ export default {
           which: this.which,
         },
         timeout: 0,
-      }).then((res) => {
-        handleResponse(res, this, () => {
-          this.$buefy.toast.open({
-            message: this.$t("common.success"),
-            type: "is-primary",
-            position: "is-top",
-            duration: 3000,
-            queue: false,
+      })
+        .then((res) => {
+          if (this.modalServerSession !== session || !this.showModalServer) {
+            return;
+          }
+          handleResponse(res, this, () => {
+            this.$buefy.toast.open({
+              message: this.$t("common.success"),
+              type: "is-primary",
+              position: "is-top",
+              duration: 3000,
+              queue: false,
+            });
+            this.showModalServer = false;
+            this.refreshTableData(res.data.data.touch, res.data.data.running);
+            this.updateConnectView();
           });
-          this.showModalServer = false;
-          this.refreshTableData(res.data.data.touch, res.data.data.running);
-          this.updateConnectView();
+        })
+        .catch((err) => {
+          if (this.modalServerSession !== session || !this.showModalServer) {
+            return;
+          }
+          this.$buefy.toast.open({
+            message: err.response?.data?.message || err.message,
+            type: "is-warning",
+            position: "is-top",
+            queue: false,
+            duration: 5000,
+          });
+        })
+        .finally(() => {
+          if (this.modalServerSession === session) {
+            this.modalServerSubmitting = false;
+          }
         });
-      });
     },
     handleClickModifySubscription(row) {
       this.which = Object.assign({}, row);

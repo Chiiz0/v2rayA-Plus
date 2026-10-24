@@ -249,6 +249,10 @@ export default {
   },
   configureServer: {
     title: "Configure Server | Server",
+    loadFailed:
+      "Failed to load the node. The editor was closed to protect its saved configuration. {message}",
+    invalidSharingAddress:
+      "The server returned an invalid or unsupported node link.",
     servername: "Servername",
     port: "Port",
     forceTLS: "forcibly TLS on",

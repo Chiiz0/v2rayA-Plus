@@ -6,7 +6,8 @@
   "scripts": {
     "serve": "vue-cli-service serve",
     "build": "vue-cli-service build",
-    "lint": "vue-cli-service lint"
+    "lint": "vue-cli-service lint",
+    "test:node-editor": "node tests/node-editor.cjs"
   },
   "resolutions": {
     "@achrinza/node-ipc": "^10.1.11",
