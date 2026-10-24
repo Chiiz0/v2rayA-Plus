@@ -382,12 +382,17 @@
           </b-field>
           <b-field
             v-show="v2ray.net === 'xhttp'"
-            label="Extra Raw JSON"
+            :label="$t('configureServer.xhttpExtraLabel')"
             label-position="on-border"
+            :type="xhttpError ? 'is-danger' : null"
+            :message="xhttpError || $t('configureServer.xhttpExtraHelp')"
           >
             <b-input
-              v-model="v2ray.xhttpRawJson"
-              placeholder="{XHTTPObject}"
+              v-model="v2ray.xhttpExtraJson"
+              type="textarea"
+              rows="6"
+              placeholder='{"xmux":{"hKeepAlivePeriod":-1}}'
+              spellcheck="false"
               expanded
             />
           </b-field>
@@ -1177,6 +1182,11 @@
 <script>
 import { generateURL, handleResponse, parseURL } from "@/assets/js/utils";
 import { Base64 } from "js-base64";
+import {
+  clearLegacyXhttpFields,
+  readXhttpSettings,
+  validateXhttpExtra,
+} from "@/assets/js/xhttp";
 
 export default {
   name: "ModalServer",
@@ -1226,7 +1236,7 @@ export default {
       protocol: "vmess",
       key: "none",
       xhttpMode: "auto",
-      xhttpRawJson: "",
+      xhttpExtraJson: "",
     },
     ss: {
       method: "2022-blake3-aes-128-gcm",
@@ -1316,13 +1326,25 @@ export default {
     tabChoice: 0,
   }),
   computed: {
+    xhttpError() {
+      if (this.tabChoice !== 0 || this.v2ray.net !== "xhttp") return "";
+      try {
+        validateXhttpExtra(this.v2ray.xhttpExtraJson, this.v2ray.xhttpMode);
+        return "";
+      } catch (err) {
+        return this.$t("configureServer.xhttpInvalidExtra", {
+          message: err.message,
+        });
+      }
+    },
     canSubmit() {
       return (
         this.editorActive &&
         !this.readonly &&
         !this.serverLoading &&
         this.serverLoaded &&
-        !this.submitting
+        !this.submitting &&
+        !this.xhttpError
       );
     },
   },
@@ -1472,9 +1494,8 @@ export default {
     handleV2rayProtocolSwitch() {},
     resolveURL(url) {
       if (url.toLowerCase().startsWith("vmess://")) {
-        let obj = JSON.parse(
-          Base64.decode(url.substring(url.indexOf("://") + 3))
-        );
+        const payload = Base64.decode(url.substring(url.indexOf("://") + 3));
+        let obj = JSON.parse(payload);
         // console.log(obj);
         obj.ps = decodeURIComponent(obj.ps);
         obj.tls = obj.tls || "none";
@@ -1484,6 +1505,11 @@ export default {
         obj.protocol = obj.protocol || "vmess";
         if (String(obj.net).toLowerCase() === "raw") {
           obj.net = "tcp";
+        }
+        if (["xhttp", "splithttp"].includes(String(obj.net).toLowerCase())) {
+          const settings = readXhttpSettings(obj, payload);
+          clearLegacyXhttpFields(obj);
+          Object.assign(obj, settings, { net: "xhttp" });
         }
         return obj;
       } else if (url.toLowerCase().startsWith("vless://")) {
@@ -1510,11 +1536,18 @@ export default {
           allowInsecure: u.params.allowInsecure || false,
           key: u.params.key,
           xhttpMode: u.params.xhttpMode || "auto",
-          xhttpRawJson: u.params.xhttpRawJson || "",
+          xhttpExtraJson: "",
           protocol: "vless",
         };
         if (o.net.toLowerCase() === "raw") {
           o.net = "tcp";
+        }
+        if (["xhttp", "splithttp"].includes(o.net.toLowerCase())) {
+          Object.assign(
+            o,
+            readXhttpSettings(Object.fromEntries(new URLSearchParams(u.query))),
+            { net: "xhttp" }
+          );
         }
         if (o.alpn !== "") {
           o.alpn = decodeURIComponent(o.alpn);
@@ -1723,9 +1756,9 @@ export default {
       let obj = {};
       let query = {};
       let tmp;
+      let xhttpExtra;
       switch (srcObj.protocol) {
         case "vless":
-          // todo: support reality and xhttp
           // https://github.com/XTLS/Xray-core/discussions/716
           query = {
             encryption: srcObj.encryption || "none",
@@ -1753,10 +1786,8 @@ export default {
             query.quicSecurity = srcObj.quicSecurity;
           }
           if (srcObj.net === "xhttp") {
-            query.xhttpMode = srcObj.xhttpMode;
-            if (srcObj.xhttpRawJson) {
-              query.xhttpRawJson = srcObj.xhttpRawJson;
-            }
+            query.mode = srcObj.xhttpMode || "auto";
+            query.extra = validateXhttpExtra(srcObj.xhttpExtraJson, query.mode);
           }
           if (query.security == "reality") {
             query.pbk = srcObj.pbk;
@@ -1775,6 +1806,15 @@ export default {
           //https://github.com/2dust/v2rayN/wiki/%E5%88%86%E4%BA%AB%E9%93%BE%E6%8E%A5%E6%A0%BC%E5%BC%8F%E8%AF%B4%E6%98%8E(ver-2)
           obj = Object.assign({}, srcObj);
           delete obj.encryption;
+          if (obj.net === "xhttp") {
+            xhttpExtra = validateXhttpExtra(
+              srcObj.xhttpExtraJson,
+              srcObj.xhttpMode
+            );
+            clearLegacyXhttpFields(obj);
+          } else {
+            delete obj.xhttpExtraJson;
+          }
           switch (obj.net) {
             case "kcp":
             case "tcp":
@@ -1791,6 +1831,7 @@ export default {
             case "grpc":
             case "kcp":
             case "mkcp":
+            case "xhttp":
               break;
             default:
               if (obj.net === "tcp" && obj.type === "http") {
@@ -1798,7 +1839,11 @@ export default {
               }
               obj.path = "";
           }
-          return "vmess://" + Base64.encode(JSON.stringify(obj));
+          tmp = JSON.stringify(obj);
+          if (xhttpExtra !== undefined) {
+            tmp = tmp.slice(0, -1) + ',"xhttpExtra":' + xhttpExtra + "}";
+          }
+          return "vmess://" + Base64.encode(tmp);
         case "ss":
           /* ss://BASE64(method:password)@server:port#name */
           tmp = `ss://${Base64.encode(`${srcObj.method}:${srcObj.password}`)}@${
@@ -2050,6 +2095,7 @@ export default {
             return;
           }
         }
+        if (!this.canSubmit) return;
         coded = this.generateURL(this.v2ray);
       } else if (this.tabChoice === 1) {
         coded = this.generateURL(this.ss);

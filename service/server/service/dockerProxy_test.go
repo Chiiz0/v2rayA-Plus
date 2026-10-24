@@ -168,62 +168,99 @@ func TestDockerProxyVLESSEncryption(t *testing.T) {
 	}
 }
 
-func TestDockerProxyEncryptionValidation(t *testing.T) {
+func TestDockerProxyConfigValidation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake Docker executable uses a POSIX shell")
 	}
-	for _, fail := range []bool{false, true} {
-		name := "supported image"
-		if fail {
-			name = "unsupported image leaves existing proxy intact"
+	for _, feature := range []struct {
+		name      string
+		encrypted bool
+		xhttp     bool
+	}{
+		{name: "VLESS Encryption", encrypted: true},
+		{name: "XHTTP", xhttp: true},
+		{name: "VLESS Encryption / XHTTP", encrypted: true, xhttp: true},
+	} {
+		for _, fail := range []bool{false, true} {
+			name := "supported image"
+			if fail {
+				name = "unsupported image leaves existing proxy intact"
+			}
+			t.Run(feature.name+"/"+name, func(t *testing.T) {
+				dir := t.TempDir()
+				calls, config := filepath.Join(dir, "calls"), filepath.Join(dir, "config.json")
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Setenv("DOCKER_TEST_CALLS", calls)
+				t.Setenv("DOCKER_TEST_CONFIG", config)
+				script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_TEST_CALLS\"\nif [ \"$1\" = rm ]; then exit 0; fi\ncase \"$*\" in *' version') echo 'Xray 26.7.28'; exit 0;; esac\ncat > \"$DOCKER_TEST_CONFIG\"\n"
+				if fail {
+					script += "echo 'invalid encryption: secret-test-key' >&2\nexit 1\n"
+				}
+				if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0700); err != nil {
+					t.Fatal(err)
+				}
+				proxy := &dockerProxyRuntime{
+					ConfigBytes: []byte(`{"outbounds":[]}`), Core: configure.DockerProxyCoreXray,
+					ImageName: "teddysun/xray:latest", VLESSEncryption: feature.encrypted, XHTTP: feature.xhttp,
+				}
+				var err error
+				if fail {
+					err = setupDockerProxyRuntime(1085, proxy, true, false)
+				} else {
+					err = validateDockerProxyConfig(proxy)
+				}
+				if (err != nil) != fail {
+					t.Fatalf("validation error = %v, want failure = %v", err, fail)
+				}
+				if fail && (!strings.Contains(err.Error(), feature.name) || strings.Contains(err.Error(), "secret-test-key")) {
+					t.Fatalf("expected actionable error without credentials, got %v", err)
+				}
+				commands, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "run --rm --network none -i --entrypoint xray teddysun/xray:latest run -test -config stdin:"
+				if feature.xhttp {
+					want = "run --rm --network none --entrypoint xray teddysun/xray:latest version\n" + want
+				}
+				if got := dockerProxyCheckCommands(t, commands); got != want {
+					t.Fatalf("unexpected Docker commands (existing proxy must be untouched): %s", commands)
+				}
+				input, err := os.ReadFile(config)
+				if err != nil || string(input) != string(proxy.ConfigBytes) {
+					t.Fatalf("configuration was not passed intact: %s, %v", input, err)
+				}
+			})
 		}
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			calls, config := filepath.Join(dir, "calls"), filepath.Join(dir, "config.json")
-			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-			t.Setenv("DOCKER_TEST_CALLS", calls)
-			t.Setenv("DOCKER_TEST_CONFIG", config)
-			script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_TEST_CALLS\"\ncat > \"$DOCKER_TEST_CONFIG\"\n"
-			if fail {
-				script += "echo 'invalid encryption: secret-test-key' >&2\nexit 1\n"
-			}
-			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0700); err != nil {
-				t.Fatal(err)
-			}
-			proxy := &dockerProxyRuntime{
-				ConfigBytes: []byte(`{"outbounds":[]}`), Core: configure.DockerProxyCoreXray,
-				ImageName: "teddysun/xray:latest", VLESSEncryption: true,
-			}
-			var err error
-			if fail {
-				err = setupDockerProxyRuntime(1085, proxy, true, false)
-			} else {
-				err = validateDockerProxyEncryption(proxy)
-			}
-			if (err != nil) != fail {
-				t.Fatalf("validation error = %v, want failure = %v", err, fail)
-			}
-			if fail && (!strings.Contains(err.Error(), "VLESS Encryption") || strings.Contains(err.Error(), "secret-test-key")) {
-				t.Fatalf("expected actionable error without credentials, got %v", err)
-			}
-			commands, err := os.ReadFile(calls)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := "run --rm --network none -i --entrypoint xray teddysun/xray:latest run -test -config stdin:\n"
-			if string(commands) != want {
-				t.Fatalf("unexpected Docker commands (existing proxy must be untouched): %s", commands)
-			}
-			input, err := os.ReadFile(config)
-			if err != nil || string(input) != string(proxy.ConfigBytes) {
-				t.Fatalf("configuration was not passed intact: %s, %v", input, err)
-			}
-		})
 	}
 	t.Run("plain VLESS needs no preflight", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
-		if err := validateDockerProxyEncryption(&dockerProxyRuntime{Core: configure.DockerProxyCoreV2Fly}); err != nil {
+		if err := validateDockerProxyConfig(&dockerProxyRuntime{Core: configure.DockerProxyCoreV2Fly}); err != nil {
 			t.Fatal(err)
 		}
 	})
+}
+
+// Every preflight invocation must clean up only its own uniquely named helper.
+func dockerProxyCheckCommands(t *testing.T, calls []byte) string {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
+	if len(lines)%2 != 0 {
+		t.Fatalf("preflight helper cleanup missing: %s", calls)
+	}
+	var normalized []string
+	seen := map[string]bool{}
+	for i := 0; i < len(lines); i += 2 {
+		fields := strings.Fields(lines[i])
+		if len(fields) < 4 || strings.Join(fields[:3], " ") != "run --rm --name" {
+			t.Fatalf("unexpected Docker operation before validation: %s", lines[i])
+		}
+		name := fields[3]
+		if !strings.HasPrefix(name, "v2raya-config-test-") || seen[name] || lines[i+1] != "rm -f "+name {
+			t.Fatalf("invalid helper cleanup: %s", calls)
+		}
+		seen[name] = true
+		normalized = append(normalized, strings.Join(append(fields[:2], fields[4:]...), " "))
+	}
+	return strings.Join(normalized, "\n")
 }

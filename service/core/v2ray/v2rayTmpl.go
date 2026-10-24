@@ -866,7 +866,7 @@ func (t *Template) AppendDokodemoTProxy(tproxy string, port int, tag string) {
 	t.Inbounds = append(t.Inbounds, dokodemo)
 }
 
-func (t *Template) SetOutboundSockopt() {
+func (t *Template) SetOutboundSockopt() error {
 	mark := 0x80
 	//tos := 184
 	for i := range t.Outbounds {
@@ -886,8 +886,11 @@ func (t *Template) SetOutboundSockopt() {
 			tmp := t.Setting.TcpFastOpen == configure.Yes
 			t.Outbounds[i].StreamSettings.Sockopt.TCPFastOpen = &tmp
 		}
-		t.checkAndSetMark(&t.Outbounds[i], mark)
+		if err := t.checkAndSetMark(&t.Outbounds[i], mark); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 func (t *Template) setDualStack() {
 	const (
@@ -1658,7 +1661,9 @@ func NewTemplate(serverInfos []serverInfo, setting *configure.Setting) (t *Templ
 	t.optimizeGeoipMemoryOccupation()
 
 	//set outboundSockopt
-	t.SetOutboundSockopt()
+	if err = t.SetOutboundSockopt(); err != nil {
+		return nil, err
+	}
 
 	//set fakedns destOverride
 	t.setInboundFakeDnsDestOverride()
@@ -1816,9 +1821,9 @@ func NewEmptyTemplate(setting *configure.Setting) (t *Template) {
 	return t
 }
 
-func (t *Template) checkAndSetMark(o *coreObj.OutboundObject, mark int) {
+func (t *Template) checkAndSetMark(o *coreObj.OutboundObject, mark int) error {
 	if !IsTransparentOn(t.Setting) {
-		return
+		return nil
 	}
 	if o.StreamSettings == nil {
 		o.StreamSettings = new(coreObj.StreamSettings)
@@ -1827,6 +1832,14 @@ func (t *Template) checkAndSetMark(o *coreObj.OutboundObject, mark int) {
 		o.StreamSettings.Sockopt = new(coreObj.Sockopt)
 	}
 	o.StreamSettings.Sockopt.Mark = &mark
+	if settings := o.StreamSettings.XHTTPSettings; settings != nil && len(settings.Extra) != 0 {
+		extra, err := markXHTTPDownloads(settings.Extra, mark, 0)
+		if err != nil {
+			return fmt.Errorf("cannot mark XHTTP download connections: %w", err)
+		}
+		settings.Extra = extra
+	}
+	return nil
 }
 
 func (t *Template) InsertMappingOutbound(o serverObj.ServerObj, inboundPort string, udpSupport bool, pluginPort int, protocol string) (err error) {
@@ -1856,7 +1869,9 @@ func (t *Template) InsertMappingOutbound(o serverObj.ServerObj, inboundPort stri
 		})
 	}
 	var mark = 0x80
-	t.checkAndSetMark(&c.CoreOutbound, mark)
+	if err := t.checkAndSetMark(&c.CoreOutbound, mark); err != nil {
+		return err
+	}
 	t.Outbounds = append(t.Outbounds, c.CoreOutbound)
 	t.Outbounds = append(t.Outbounds, c.ExtraOutbounds...)
 	iPort, err := strconv.Atoi(inboundPort)

@@ -1,5 +1,7 @@
 package coreObj
 
+import "encoding/json"
+
 type APIObject struct {
 	Tag      string   `json:"tag"`
 	Services []string `json:"services"`
@@ -171,6 +173,7 @@ type Sockopt struct {
 	Tos         *int    `json:"tos,omitempty"`
 	TCPFastOpen *bool   `json:"tcpFastOpen,omitempty"`
 	Tproxy      *string `json:"tproxy,omitempty"`
+	DialerProxy string  `json:"dialerProxy,omitempty"`
 }
 type Mux struct {
 	Enabled     bool `json:"enabled"`
@@ -255,9 +258,10 @@ type QuicSettings struct {
 	Security string    `json:"security"`
 }
 type XHTTPSettings struct {
-	Path string `json:"path"`
-	Host string `json:"host,omitempty"`
-	Mode string `json:"mode,omitempty"`
+	Path  string          `json:"path"`
+	Host  string          `json:"host,omitempty"`
+	Mode  string          `json:"mode,omitempty"`
+	Extra json.RawMessage `json:"extra,omitempty"`
 }
 type Hosts map[string][]string
 

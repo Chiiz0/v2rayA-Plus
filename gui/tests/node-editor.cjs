@@ -15,6 +15,7 @@ const realm = vm.createContext({
   console,
   setTimeout,
   clearTimeout,
+  URLSearchParams,
 });
 function load(source, imports) {
   const { code } = babel.transformSync(source, {
@@ -59,12 +60,16 @@ const utils = load(
   fs.readFileSync(path.join(gui, "src/assets/js/utils.js"), "utf8"),
   { "./const.js": {} }
 );
+const xhttp = load(
+  fs.readFileSync(path.join(gui, "src/assets/js/xhttp.js"), "utf8"),
+  {}
+);
 function component(filename) {
   return load(
     fs
       .readFileSync(path.join(gui, filename), "utf8")
       .match(/<script>([\s\S]*?)<\/script>/)[1],
-    { "@/assets/js/utils": utils }
+    { "@/assets/js/utils": utils, "@/assets/js/xhttp": xhttp }
   ).default;
 }
 const editor = component("src/components/modalServer.vue");
@@ -105,9 +110,10 @@ function setup(which = { id: 1, _type: "server" }) {
       this.emitted.push(args);
     },
   };
-  Object.defineProperty(c, "canSubmit", {
-    get: () => editor.computed.canSubmit.call(c),
-  });
+  for (const name of ["xhttpError", "canSubmit"])
+    Object.defineProperty(c, name, {
+      get: () => editor.computed[name].call(c),
+    });
   c.$parent = {
     close() {
       c.closed++;
@@ -123,7 +129,384 @@ function setup(which = { id: 1, _type: "server" }) {
   return c;
 }
 const good = { data: { code: "SUCCESS", data: { sharingAddress: link } } };
+const xhttpLink = (params = {}) =>
+  "vless://11111111-1111-4111-8111-111111111111@203.0.113.10:24443?" +
+  new URLSearchParams({ type: "xhttp", security: "none", ...params });
+const vmessXhttpLink = (extra, fields = {}) => {
+  const payload = JSON.stringify({
+    ps: "before",
+    add: "203.0.113.10",
+    port: 24443,
+    id: "11111111-1111-4111-8111-111111111111",
+    aid: 0,
+    net: "xhttp",
+    path: "/up",
+    host: "upload.example",
+    scy: "aes-128-gcm",
+    xhttpMode: "packet-up",
+    ...fields,
+  });
+  return (
+    "vmess://" +
+    Base64.encode(
+      extra === undefined
+        ? payload
+        : payload.slice(0, -1) + ',"xhttpExtra":' + extra + "}"
+    )
+  );
+};
 (async () => {
+  const extra =
+    '{"noGRPCHeader":false,"noSSEHeader":false,"scMaxBufferedPosts":0,"scMaxEachPostBytes":"1000-2000","scMinPostsIntervalMs":"-1--1","xPaddingBytes":0,"xmux":{"maxConcurrency":0,"maxConnections":"2-4","hKeepAlivePeriod":-1},"headers":{"X-Test":"a:b},\\"+%=/"},"unknown":{"large":9007199254740993,"enabled":false,"values":[0,-1,null]},"downloadSettings":{"network":"xhttp","address":"download.example","port":443,"xhttpSettings":{"path":"/down","mode":"stream-up","extra":{"unknownNested":{"v":0},"noSSEHeader":false}}}}';
+  for (const protocol of ["vless", "vmess"]) {
+    const original =
+      protocol === "vless"
+        ? xhttpLink({
+            mode: "packet-up",
+            path: "/up",
+            host: "upload.example",
+            encryption: "mlkem768x25519plus.native.0rtt.test+key/=",
+            extra,
+          })
+        : vmessXhttpLink(extra);
+    const c = setup();
+    const pending = editor.mounted.call(c);
+    c.requests[0].resolve({
+      data: { code: "SUCCESS", data: { sharingAddress: original } },
+    });
+    await pending;
+    assert.equal(c.serverLoaded, true);
+    assert.equal(c.canSubmit, true);
+    assert.match(c.v2ray.xhttpExtraJson, /9007199254740993/);
+    assert.deepEqual(JSON.parse(c.v2ray.xhttpExtraJson), JSON.parse(extra));
+    c.v2ray.ps = "renamed";
+    await c.handleClickSubmit();
+    assert.equal(c.emitted.length, 1);
+    const generated = c.emitted[0][1];
+    const again = c.resolveURL(generated);
+    assert.equal(again.ps, "renamed");
+    assert.equal(again.path, "/up");
+    assert.equal(again.host, "upload.example");
+    assert.equal(again.xhttpMode, "packet-up");
+    assert.deepEqual(JSON.parse(again.xhttpExtraJson), JSON.parse(extra));
+    assert.match(again.xhttpExtraJson, /9007199254740993/);
+    if (protocol === "vless") {
+      const query = new URL(generated).searchParams;
+      assert.equal(query.get("mode"), "packet-up");
+      assert.equal(query.has("xhttpMode"), false);
+      assert.equal(query.has("xhttpRawJson"), false);
+      assert.equal(query.get("encryption"), c.v2ray.encryption);
+    } else {
+      const json = Base64.decode(generated.slice(8));
+      assert.match(json, /9007199254740993/);
+      const payload = JSON.parse(json);
+      assert.equal(typeof payload.xhttpExtra, "object");
+      assert.equal(payload.xhttpExtraJson, undefined);
+      assert.equal(payload.xhttpRawJson, undefined);
+      assert.equal(payload.scy, "aes-128-gcm");
+      assert.equal(payload.encryption, undefined);
+    }
+    c.v2ray.xhttpExtraJson = "";
+    const cleared = c.resolveURL(c.generateURL(c.v2ray));
+    assert.equal(cleared.xhttpExtraJson, "{}");
+    assert.equal(cleared.path, "/up");
+    console.log(
+      `PASS: ${protocol} XHTTP load/edit/save preserves extra, large integers, downloadSettings and explicit clearing`
+    );
+  }
+  {
+    const legacy = JSON.stringify({
+      host: "legacy.example",
+      path: "/legacy",
+      mode: "stream-up",
+      unknown: { keep: 0 },
+      noSSEHeader: true,
+      extra: { noSSEHeader: false },
+    });
+    for (const source of [
+      xhttpLink({ xhttpRawJson: legacy }),
+      vmessXhttpLink(undefined, {
+        xhttpRawJson: legacy,
+        host: "",
+        path: "",
+        xhttpMode: "",
+      }),
+      vmessXhttpLink(undefined, {
+        xhttpRawJson: legacy,
+        host: "",
+        path: "",
+        xhttpMode: "auto",
+      }),
+    ]) {
+      const model = editor.methods.resolveURL(source);
+      assert.equal(model.host, "legacy.example");
+      assert.equal(model.path, "/legacy");
+      assert.equal(model.xhttpMode, "stream-up");
+      assert.deepEqual(JSON.parse(model.xhttpExtraJson), {
+        unknown: { keep: 0 },
+        noSSEHeader: false,
+      });
+      const saved = editor.methods.resolveURL(
+        editor.methods.generateURL(model)
+      );
+      assert.equal(saved.path, "/legacy");
+      assert.equal(saved.xhttpMode, "stream-up");
+      assert.deepEqual(
+        JSON.parse(saved.xhttpExtraJson),
+        JSON.parse(model.xhttpExtraJson)
+      );
+    }
+    const model = editor.methods.resolveURL(
+      xhttpLink({
+        host: "",
+        path: "",
+        mode: "auto",
+        xhttpMode: "packet-up",
+        xhttpRawJson: legacy,
+        extra: "{}",
+        noSSEHeader: "false",
+        scMaxBufferedPosts: "0",
+        xmuxHKeepAlive: "-1",
+        xPaddingBytesFrom: "8",
+        x_padding_bytes: "100-200",
+      })
+    );
+    assert.equal(model.host, "");
+    assert.equal(model.path, "");
+    assert.equal(model.xhttpMode, "auto");
+    assert.deepEqual(JSON.parse(model.xhttpExtraJson), {
+      noSSEHeader: false,
+      scMaxBufferedPosts: 0,
+      xmux: { hKeepAlivePeriod: -1 },
+      xPaddingBytes: 8,
+    });
+    const canonical = editor.methods.resolveURL(
+      vmessXhttpLink("{}", {
+        xhttpRawJson: "invalid legacy",
+        noSSEHeader: true,
+      })
+    );
+    assert.equal(canonical.xhttpExtraJson, "{}");
+    for (const source of [
+      xhttpLink({ xhttpRawJson: legacy, mode: "" }),
+      xhttpLink({ xhttpRawJson: legacy, xhttpMode: "" }),
+      vmessXhttpLink(undefined, {
+        xhttpRawJson: legacy,
+        mode: "",
+        xhttpMode: "",
+      }),
+      vmessXhttpLink("{}", { xhttpRawJson: legacy, xhttpMode: "" }),
+      vmessXhttpLink(undefined, {
+        xhttpRawJson: legacy,
+        mode: "auto",
+        xhttpMode: "auto",
+      }),
+      vmessXhttpLink("{}", { xhttpRawJson: legacy, xhttpMode: "auto" }),
+    ])
+      assert.equal(editor.methods.resolveURL(source).xhttpMode, "auto");
+    console.log(
+      "PASS: canonical/legacy/flattened precedence preserves explicit empty basics, false, zero and one-sided ranges"
+    );
+  }
+  {
+    for (const alias of ["XHTTP", "splitHTTP", "SPLITHTTP"]) {
+      for (const source of [
+        xhttpLink({ type: alias }),
+        vmessXhttpLink("{}", { net: alias }),
+      ]) {
+        const model = editor.methods.resolveURL(source);
+        assert.equal(model.net, "xhttp");
+        assert.equal(
+          editor.methods.resolveURL(editor.methods.generateURL(model)).net,
+          "xhttp"
+        );
+      }
+    }
+    const model = editor.methods.resolveURL(
+      xhttpLink({
+        type: "splithttp",
+        extra:
+          '{"scMaxBufferedPosts":9223372036854775807,"scMaxEachPostBytes":"2000-1000","xmux":{"hKeepAlivePeriod":9223372036854775807,"cMaxReuseTimes":"-2--1"}}',
+      })
+    );
+    assert.equal(model.net, "xhttp");
+    assert.match(model.xhttpExtraJson, /9223372036854775807/);
+    assert.match(model.xhttpExtraJson, /2000-1000/);
+    assert.match(editor.methods.generateURL(model), /type=xhttp/);
+    console.log(
+      "PASS: splitHTTP alias, reversed ranges and int64 values remain lossless"
+    );
+  }
+  {
+    const fields = {
+      xhttpMode: "stream-up",
+      extra: '{"future":{"big":9007199254740993}}',
+      noGRPCHeader: false,
+      noSSEHeader: "0",
+      xPaddingObfsMode: "false",
+      scMaxBufferedPosts: "9223372036854775807",
+      serverMaxHeaderBytes: 0,
+      scMaxEachPostBytesFrom: 0,
+      scMaxEachPostBytesTo: 0,
+      scMinPostsIntervalFrom: -1,
+      scMinPostsIntervalTo: -2,
+      scStreamUpServerFrom: 1,
+      scStreamUpServerTo: 2,
+      xPaddingBytesFrom: 0,
+      xPaddingBytesTo: 0,
+      xmuxMaxConcurFrom: 0,
+      xmuxMaxConnFrom: 1,
+      xmuxMaxConnTo: 2,
+      xmuxCMaxReuseFrom: -1,
+      xmuxHMaxReqFrom: 4,
+      xmuxHMaxReqTo: 8,
+      xmuxHMaxReusableTo: 30,
+      xmuxHKeepAlive: "-9223372036854775808",
+      xhttpHeaders: '{"X-Imported":"value"}',
+      xPaddingKey: "",
+      sessionIDLength: "4-8",
+      uplinkChunkSize: "1024-2048",
+      uplinkHTTPMethod: "PATCH",
+    };
+    for (const source of [
+      xhttpLink(fields),
+      vmessXhttpLink(undefined, fields),
+    ]) {
+      const model = editor.methods.resolveURL(source);
+      const saved = editor.methods.resolveURL(
+        editor.methods.generateURL(model)
+      );
+      assert.equal(saved.xhttpMode, "stream-up");
+      assert.match(saved.xhttpExtraJson, /9007199254740993/);
+      assert.match(saved.xhttpExtraJson, /9223372036854775807/);
+      assert.match(saved.xhttpExtraJson, /-9223372036854775808/);
+      const parsed = JSON.parse(saved.xhttpExtraJson);
+      assert.equal(parsed.noGRPCHeader, false);
+      assert.equal(parsed.noSSEHeader, false);
+      assert.equal(parsed.xPaddingObfsMode, false);
+      assert.equal(parsed.serverMaxHeaderBytes, 0);
+      assert.equal(parsed.scMaxEachPostBytes, 0);
+      assert.equal(parsed.scMinPostsIntervalMs, "-1--2");
+      assert.equal(parsed.scStreamUpServerSecs, "1-2");
+      assert.equal(parsed.xPaddingBytes, 0);
+      assert.equal(parsed.xmux.maxConcurrency, 0);
+      assert.equal(parsed.xmux.maxConnections, "1-2");
+      assert.equal(parsed.xmux.cMaxReuseTimes, -1);
+      assert.equal(parsed.xmux.hMaxRequestTimes, "4-8");
+      assert.equal(parsed.xmux.hMaxReusableSecs, 30);
+      assert.equal(parsed.headers["X-Imported"], "value");
+      assert.equal(parsed.xPaddingKey, "");
+      assert.equal(parsed.sessionIDLength, "4-8");
+      assert.equal(parsed.uplinkChunkSize, "1024-2048");
+      assert.equal(parsed.uplinkHTTPMethod, "PATCH");
+    }
+    console.log(
+      "PASS: every legacy XHTTP flattened range and scalar maps losslessly in VMess and VLESS"
+    );
+  }
+  const invalidExtras = [
+    "{",
+    "[]",
+    "null",
+    '"text"',
+    '{"scMaxEachPostBytes":"0-100"}',
+    '{"scMaxEachPostBytes":-1}',
+    '{"scMaxEachPostBytes":1e3}',
+    '{"xPaddingBytes":-1}',
+    '{"xPaddingBytes":{"from":1,"to":2}}',
+    '{"xPaddingBytes":2147483648}',
+    '{"scMaxBufferedPosts":-1}',
+    '{"scMaxBufferedPosts":9223372036854775808}',
+    '{"serverMaxHeaderBytes":2147483648}',
+    '{"noSSEHeader":"false"}',
+    '{"uplinkHTTPMethod":null}',
+    '{"sessionIDTable":"abc"}',
+    '{"sessionIDTable":"abc","sessionIDLength":0}',
+    '{"sessionIDTable":"abc","sessionIDLength":"-1-10"}',
+    '{"sessionIDTable":"abc","sessionIDLength":"1-2147483647"}',
+    '{"sessionIDTable":"abc","sessionIDLength":"2147483647-1"}',
+    '{"headers":{"Host":"forbidden.example"}}',
+    '{"headers":{"X-Test":0}}',
+    '{"xmux":{"maxConcurrency":2,"maxConnections":3}}',
+    '{"xmux":{"hKeepAlivePeriod":9223372036854775808}}',
+    '{"downloadSettings":[]}',
+    '{"downloadSettings":{"network":"tcp"}}',
+    '{"downloadSettings":{"network":"xhttp","port":443}}',
+    '{"downloadSettings":{"network":"xhttp","address":"","port":443}}',
+    '{"downloadSettings":{"network":"xhttp","address":null,"port":443}}',
+    '{"downloadSettings":{"network":"xhttp","address":"download.example"}}',
+    '{"downloadSettings":{"network":"xhttp","address":"download.example","port":0}}',
+    '{"downloadSettings":{"network":"xhttp","address":"download.example","port":65536}}',
+    '{"downloadSettings":{"network":"xhttp","address":"download.example","port":"443"}}',
+    '{"downloadSettings":{"network":"xhttp","address":"download.example","port":443,"xhttpSettings":{"extra":{"scMaxEachPostBytes":-1}}}}',
+  ];
+  for (const bad of invalidExtras) {
+    const c = setup(null);
+    await editor.mounted.call(c);
+    c.v2ray = c.resolveURL(xhttpLink());
+    c.v2ray.xhttpExtraJson = bad;
+    assert.match(c.xhttpError, /^configureServer.xhttpInvalidExtra:/);
+    assert.equal(c.canSubmit, false);
+    await c.handleClickSubmit();
+    assert.equal(c.emitted.length, 0);
+    assert.throws(() => c.generateURL(c.v2ray));
+  }
+  for (const valid of [
+    '{"sessionIDTable":"abc","sessionIDLength":"12-8"}',
+    '{"sessionIDTable":"abc","sessionIDLength":2147483646}',
+    '{"sessionIDTable":"","sessionIDLength":0}',
+    '{"sessionIDTable":""}',
+  ]) {
+    assert.doesNotThrow(() => xhttp.validateXhttpExtra(valid));
+  }
+  {
+    const c = setup(null);
+    await editor.mounted.call(c);
+    c.v2ray = c.resolveURL(xhttpLink({ extra }));
+    c.v2ray.xhttpMode = "stream-one";
+    assert.match(c.xhttpError, /downloadSettings/);
+    await c.handleClickSubmit();
+    assert.equal(c.emitted.length, 0);
+    c.v2ray.xhttpMode = "auto";
+    assert.equal(c.canSubmit, true);
+    console.log(
+      `PASS: ${invalidExtras.length} invalid extra shapes/ranges and incompatible download mode cannot save; correcting input unlocks save`
+    );
+  }
+  {
+    const c = setup();
+    const pending = editor.mounted.call(c);
+    c.requests[0].resolve({
+      data: {
+        code: "SUCCESS",
+        data: { sharingAddress: xhttpLink({ extra: "[]" }) },
+      },
+    });
+    await pending;
+    assert.equal(c.closed, 1);
+    assert.equal(c.serverLoaded, false);
+    await c.handleClickSubmit();
+    assert.equal(c.emitted.length, 0);
+    const edited = setup(null);
+    await editor.mounted.call(edited);
+    edited.v2ray = edited.resolveURL(xhttpLink());
+    edited.v2ray.allowInsecure = true;
+    let confirm;
+    edited.$buefy.dialog = {
+      confirm: () =>
+        new Promise((resolve) => {
+          confirm = resolve;
+        }),
+    };
+    const submitting = edited.handleClickSubmit();
+    edited.v2ray.xhttpExtraJson = "[]";
+    confirm({ result: true });
+    await submitting;
+    assert.equal(edited.emitted.length, 0);
+    console.log(
+      "PASS: invalid XHTTP on load or while confirmation is pending cannot overwrite a node"
+    );
+  }
   for (const network of ["raw", "RAW", "tcp"]) {
     const encryption = "mlkem768x25519plus.native.0rtt.test+key/=";
     const params = new URLSearchParams({

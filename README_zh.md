@@ -199,6 +199,14 @@ Redirect 模式劫持 DNS 前，会将 `resolv.conf` 原始内容和权限、符
 
 Docker 代理页的 **PING** 检查节点 TCP 连接，**HTTP** 则通过每个运行中容器的实际 SOCKS5 代理测试，使用该容器的内核、配置和前置代理链。HTTP 测试会启动临时 `curlimages/curl:latest` 容器，共享代理的网络命名空间；首次测试可能需要下载镜像，也可提前执行 `docker pull curlimages/curl:latest`。测试不会重启代理或主内核，并会分别显示暂停、停止和容器不存在的状态。普通节点列表中的 HTTP 测试仍使用主服务内核。
 
+### XHTTP 高级参数
+
+VLESS 和 VMess 的 XHTTP 节点支持在编辑器中填写高级参数 JSON，包括 `headers`、`xmux`、填充参数和 `downloadSettings` 下载分离。填写 Xray `xhttpSettings.extra` 对象；Host、Path 和 Mode 使用各自的输入框。导入、保存、编辑和分享会保留未知扩展字段，以及显式的 `false`、`0` 和 `-1`；清空高级参数后保存会移除这些配置。
+
+VLESS 分享使用标准的 `mode` 和 URL 编码后的 `extra`，同时兼容旧 `xhttpMode`、`xhttpRawJson` 及上游的展开参数。旧节点若仍保存原始 URI，可从中恢复此前未保存的高级参数。此功能需要 **Xray**；程序会按所用参数检查已知版本要求，创建或替换 Docker 代理前还会验证实际镜像。镜像过旧时先执行 `docker pull teddysun/xray:latest`。已有 Docker 代理需要编辑并保存以重新生成配置。
+
+运行 `scripts/test-xhttp-docker.sh` 可执行隔离的真实 Xray HTTP 回归测试，需要 Docker 和 Go；测试创建临时容器与内部网络，不发布宿主机端口。数据库和新版界面的评估、迁移顺序及验收标准见[上游迁移路线](docs/upstream-migration.md)。
+
 ### 配置写入方案
 由于 `v2fly-core` 使用 Distroless 镜像（无 Shell 环境），通过 `alpine` 轻量辅助容器将节点配置写入各自的独立 Docker Volume（`v2raya-socks-<port>`），然后再挂载给代理容器运行。
 

@@ -2,12 +2,17 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"github.com/v2rayA/v2rayA/common/netTools/ports"
 	"github.com/v2rayA/v2rayA/conf"
 	"github.com/v2rayA/v2rayA/core/coreObj"
@@ -15,6 +20,7 @@ import (
 	"github.com/v2rayA/v2rayA/core/v2ray/where"
 	"github.com/v2rayA/v2rayA/db/configure"
 	"github.com/v2rayA/v2rayA/pkg/util/log"
+	"golang.org/x/mod/semver"
 )
 
 type SimpleInbound struct {
@@ -56,6 +62,7 @@ type dockerProxyRuntime struct {
 	ServerName      string
 	FrontServerName string
 	VLESSEncryption bool
+	XHTTP           bool
 }
 
 type dockerProxyCoreRuntime struct {
@@ -141,7 +148,7 @@ func selectDockerProxyCore(core configure.DockerProxyCore, detectedVariant where
 		runtime.ImageName = "teddysun/xray:latest"
 		runtime.MountPath = "/etc/xray"
 		// The Docker image can differ from the main service's Xray version.
-		// Validate encrypted VLESS configurations against the actual image.
+		// Validate XHTTP and encrypted VLESS against the actual image.
 		return runtime, nil
 	}
 
@@ -246,8 +253,23 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 				break
 			}
 		}
-		leafOutbound.ProxySettings = &coreObj.ProxySettings{
-			Tag: "pre-proxy",
+		if stream := leafOutbound.StreamSettings; stream != nil && strings.EqualFold(stream.Network, "xhttp") {
+			// Legacy proxySettings bypasses the target's transport. XHTTP must
+			// send both its upload and independent download sockets via the front.
+			if stream.Sockopt == nil {
+				stream.Sockopt = &coreObj.Sockopt{}
+			}
+			stream.Sockopt.DialerProxy = "pre-proxy"
+			leafOutbound.ProxySettings = nil
+			if stream.XHTTPSettings != nil && len(stream.XHTTPSettings.Extra) != 0 {
+				extra, err := chainXHTTPDownloads(stream.XHTTPSettings.Extra, "pre-proxy", 0)
+				if err != nil {
+					return nil, fmt.Errorf("failed to chain XHTTP downloads: %w", err)
+				}
+				stream.XHTTPSettings.Extra = extra
+			}
+		} else {
+			leafOutbound.ProxySettings = &coreObj.ProxySettings{Tag: "pre-proxy"}
 		}
 
 		outbounds = append(outbounds, c.CoreOutbound)
@@ -288,8 +310,11 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
 	}
-	var vlessEncryption bool
+	var vlessEncryption, xhttp bool
 	for _, outbound := range outbounds {
+		if outbound.StreamSettings != nil && strings.EqualFold(outbound.StreamSettings.Network, "xhttp") {
+			xhttp = true
+		}
 		if outbound.Protocol != "vless" {
 			continue
 		}
@@ -312,29 +337,145 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 		ServerName:      server.GetName(),
 		FrontServerName: frontServerName,
 		VLESSEncryption: vlessEncryption,
+		XHTTP:           xhttp,
 	}, nil
 }
 
-func validateDockerProxyEncryption(runtime *dockerProxyRuntime) error {
-	if !runtime.VLESSEncryption {
+// Preserve the complete extra object, including unknown fields and large JSON
+// numbers, while ensuring split download sockets obey the selected front proxy.
+func chainXHTTPDownloads(extra json.RawMessage, tag string, depth int) (json.RawMessage, error) {
+	if depth > 16 {
+		return nil, fmt.Errorf("download settings are nested too deeply")
+	}
+	if !gjson.ValidBytes(extra) || !gjson.ParseBytes(extra).IsObject() {
+		return nil, fmt.Errorf("extra must be a JSON object")
+	}
+	download := gjson.GetBytes(extra, "downloadSettings")
+	if !download.Exists() {
+		return extra, nil
+	}
+	if !download.IsObject() {
+		return nil, fmt.Errorf("downloadSettings must be a JSON object")
+	}
+	if options := download.Get("sockopt"); options.Exists() && options.Type != gjson.Null && !options.IsObject() {
+		return nil, fmt.Errorf("downloadSettings.sockopt must be a JSON object")
+	}
+	stream, err := sjson.SetBytes([]byte(download.Raw), "sockopt.dialerProxy", tag)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"xhttpSettings", "splithttpSettings"} {
+		settings := download.Get(key)
+		if !settings.Exists() {
+			continue
+		}
+		if !settings.IsObject() {
+			return nil, fmt.Errorf("downloadSettings.%s must be a JSON object", key)
+		}
+		path, raw := key, settings.Raw
+		if nested := settings.Get("extra"); nested.Exists() {
+			path, raw = key+".extra", nested.Raw
+		}
+		updated, err := chainXHTTPDownloads(json.RawMessage(raw), tag, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		stream, err = sjson.SetRawBytes(stream, path, updated)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return sjson.SetRawBytes(extra, "downloadSettings", stream)
+}
+
+func validateDockerProxyConfig(runtime *dockerProxyRuntime) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	return validateDockerProxyConfigContext(ctx, runtime)
+}
+
+func validateDockerProxyConfigContext(ctx context.Context, runtime *dockerProxyRuntime) error {
+	var features []string
+	if runtime.VLESSEncryption {
+		features = append(features, "VLESS Encryption")
+	}
+	if runtime.XHTTP {
+		features = append(features, "XHTTP")
+	}
+	if len(features) == 0 {
 		return nil
 	}
+	feature := strings.Join(features, " / ")
 	if runtime.Core != configure.DockerProxyCoreXray {
-		return fmt.Errorf("VLESS Encryption requires Xray; select Xray for this Docker proxy")
+		return fmt.Errorf("%s requires Xray; select Xray for this Docker proxy", feature)
 	}
-	cmd := exec.Command("docker", "run", "--rm", "--network", "none", "-i",
-		"--entrypoint", "xray", runtime.ImageName, "run", "-test", "-config", "stdin:")
-	cmd.Stdin = bytes.NewReader(runtime.ConfigBytes)
-	// Core diagnostics can include encryption credentials, so don't return them.
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to validate VLESS Encryption with Docker image %q; ensure Docker is available and update the Xray image to a version supporting the node's encryption settings: %w", runtime.ImageName, err)
+	if runtime.XHTTP {
+		output, err := runDockerProxyCoreCheck(ctx, runtime.ImageName, nil, "version")
+		if err != nil {
+			return fmt.Errorf("failed to read Xray version from Docker image %q: %w", runtime.ImageName, err)
+		}
+		fields := strings.Fields(string(output))
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "Xray") || !semver.IsValid("v"+strings.TrimPrefix(fields[1], "v")) {
+			return fmt.Errorf("cannot determine Xray version from Docker image %q; update the image", runtime.ImageName)
+		}
+		var config SimpleConfig
+		if err := json.Unmarshal(runtime.ConfigBytes, &config); err != nil {
+			return fmt.Errorf("invalid generated Docker proxy configuration")
+		}
+		for _, outbound := range config.Outbounds {
+			stream := outbound.StreamSettings
+			if stream == nil || !strings.EqualFold(stream.Network, "xhttp") {
+				continue
+			}
+			settings := stream.XHTTPSettings
+			if settings == nil {
+				return fmt.Errorf("missing XHTTP settings in generated Docker proxy configuration")
+			}
+			if err := serverObj.ValidateXHTTPCore(settings.Mode, settings.Extra, serverObj.PriorInfo{Variant: where.Xray, CoreVersion: fields[1]}); err != nil {
+				return fmt.Errorf("Docker Xray image %q: %w", runtime.ImageName, err)
+			}
+		}
+	}
+	if _, err := runDockerProxyCoreCheck(ctx, runtime.ImageName, runtime.ConfigBytes, "run", "-test", "-config", "stdin:"); err != nil {
+		return fmt.Errorf("failed to validate %s with Docker image %q; ensure Docker is available and update the Xray image to a version supporting the node's settings: %w", feature, runtime.ImageName, err)
 	}
 	return nil
 }
 
+func runDockerProxyCoreCheck(ctx context.Context, image string, config []byte, args ...string) ([]byte, error) {
+	helperName := fmt.Sprintf("v2raya-config-test-%d-%d", os.Getpid(), time.Now().UnixNano())
+	defer func() {
+		// A canceled Docker CLI can leave its container running. Cleanup must
+		// use a fresh context and may only remove this invocation's helper.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(cleanupCtx, "docker", "rm", "-f", helperName).Run()
+	}()
+	dockerArgs := []string{"run", "--rm", "--name", helperName, "--network", "none"}
+	if config != nil {
+		dockerArgs = append(dockerArgs, "-i")
+	}
+	dockerArgs = append(dockerArgs, "--entrypoint", "xray", image)
+	dockerArgs = append(dockerArgs, args...)
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.WaitDelay = 3 * time.Second
+	cmd.Stdin = bytes.NewReader(config)
+	// Core diagnostics may include credentials or custom headers. Only the
+	// version command needs stdout; never include diagnostics in returned errors.
+	var output bytes.Buffer
+	if config == nil {
+		cmd.Stdout = &output
+	}
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return output.Bytes(), err
+}
+
 func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolume bool, pauseAfterStart bool) (err error) {
 	// Check before removing the current container or changing its volume.
-	if err := validateDockerProxyEncryption(runtime); err != nil {
+	if err := validateDockerProxyConfig(runtime); err != nil {
 		return err
 	}
 	containerName := fmt.Sprintf("v2raya-socks-%d", port)

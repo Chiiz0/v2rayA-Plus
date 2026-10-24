@@ -253,6 +253,10 @@ export default {
       "Failed to load the node. The editor was closed to protect its saved configuration. {message}",
     invalidSharingAddress:
       "The server returned an invalid or unsupported node link.",
+    xhttpExtraLabel: "XHTTP extra (JSON object)",
+    xhttpExtraHelp:
+      "Advanced Xray settings, including headers, ranges, xmux and downloadSettings. Use the Host, Path and Mode fields above for basic settings. Unknown keys are preserved; leaving this empty clears the extra settings. The selected Xray core must support these fields.",
+    xhttpInvalidExtra: "Invalid XHTTP settings: {message}",
     servername: "Servername",
     port: "Port",
     forceTLS: "forcibly TLS on",

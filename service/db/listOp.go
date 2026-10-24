@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -114,7 +115,9 @@ func ListRemove(bucket, key string, indexes []int) error {
 		} else {
 			b := bkt.Get([]byte(key))
 
-			var list []interface{}
+			// Keep untouched entries verbatim; decoding into interface{} rounds
+			// unknown node parameters above float64's integer precision.
+			var list []json.RawMessage
 			if err := jsoniter.Unmarshal(b, &list); err != nil {
 				return err
 			}
@@ -139,7 +142,10 @@ func ListRemove(bucket, key string, indexes []int) error {
 			}
 			list = list[:len(list)-dist]
 
-			b, _ = jsoniter.Marshal(list)
+			b, err = jsoniter.Marshal(list)
+			if err != nil {
+				return err
+			}
 			return bkt.Put([]byte(key), b)
 		}
 	})

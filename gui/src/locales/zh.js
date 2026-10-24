@@ -246,6 +246,10 @@ export default {
     title: "配置节点 | 节点",
     loadFailed: "节点加载失败，编辑器已关闭以保护原配置。{message}",
     invalidSharingAddress: "服务端返回了无效或不支持的节点链接。",
+    xhttpExtraLabel: "XHTTP extra（JSON 对象）",
+    xhttpExtraHelp:
+      "填写 headers、范围、xmux、downloadSettings 等 Xray 高级参数。基础设置请使用上方 Host、Path 和 Mode。未知字段会保留；留空会清除高级参数。所选 Xray 内核须支持这些字段。",
+    xhttpInvalidExtra: "XHTTP 参数无效：{message}",
     servername: "节点名称",
     port: "端口号",
     forceTLS: "强制开启TLS",

@@ -2,6 +2,7 @@ package serverObj
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -33,31 +34,32 @@ func init() {
 }
 
 type V2Ray struct {
-	Ps            string `json:"ps"`
-	Add           string `json:"add"`
-	Port          string `json:"port"`
-	ID            string `json:"id"`
-	Aid           string `json:"aid"`
-	Security      string `json:"scy"`
-	Encryption    string `json:"encryption,omitempty"`
-	Net           string `json:"net"`
-	Type          string `json:"type"`
-	Host          string `json:"host"`
-	SNI           string `json:"sni,omitempty"`
-	Path          string `json:"path"`
-	TLS           string `json:"tls"`
-	Fingerprint   string `json:"fingerprint,omitempty"`
-	PublicKey     string `json:"pbk,omitempty"`
-	ShortId       string `json:"sid,omitempty"`
-	SpiderX       string `json:"spx,omitempty"`
-	Flow          string `json:"flow,omitempty"`
-	Alpn          string `json:"alpn,omitempty"`
-	AllowInsecure bool   `json:"allowInsecure"`
-	Key           string `json:"key,omitempty"`
-	QuicSecurity  string `json:"quicSecurity"`
-	XHTTPMode     string `json:"xhttpMode,omitempty"`
-	V             string `json:"v"`
-	Protocol      string `json:"protocol"`
+	Ps            string          `json:"ps"`
+	Add           string          `json:"add"`
+	Port          string          `json:"port"`
+	ID            string          `json:"id"`
+	Aid           string          `json:"aid"`
+	Security      string          `json:"scy"`
+	Encryption    string          `json:"encryption,omitempty"`
+	Net           string          `json:"net"`
+	Type          string          `json:"type"`
+	Host          string          `json:"host"`
+	SNI           string          `json:"sni,omitempty"`
+	Path          string          `json:"path"`
+	TLS           string          `json:"tls"`
+	Fingerprint   string          `json:"fingerprint,omitempty"`
+	PublicKey     string          `json:"pbk,omitempty"`
+	ShortId       string          `json:"sid,omitempty"`
+	SpiderX       string          `json:"spx,omitempty"`
+	Flow          string          `json:"flow,omitempty"`
+	Alpn          string          `json:"alpn,omitempty"`
+	AllowInsecure bool            `json:"allowInsecure"`
+	Key           string          `json:"key,omitempty"`
+	QuicSecurity  string          `json:"quicSecurity"`
+	XHTTPMode     string          `json:"xhttpMode,omitempty"`
+	XHTTPExtra    json.RawMessage `json:"xhttpExtra,omitempty"`
+	V             string          `json:"v"`
+	Protocol      string          `json:"protocol"`
 }
 
 func (v *V2Ray) UnmarshalJSON(data []byte) error {
@@ -74,6 +76,11 @@ func (v *V2Ray) UnmarshalJSON(data []byte) error {
 			v.Encryption = "none"
 		} else {
 			v.Encryption = v.vlessEncryption()
+		}
+	}
+	if strings.EqualFold(v.Net, "xhttp") || strings.EqualFold(v.Net, "splithttp") {
+		if err := v.restoreXHTTPJSON(data); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -167,10 +174,9 @@ func ParseVlessURL(vless string) (data *V2Ray, err error) {
 	if data.Net == "quic" {
 		data.QuicSecurity = u.Query().Get("quicSecurity")
 	}
-	if data.Net == "xhttp" {
-		data.XHTTPMode = u.Query().Get("xhttpMode")
-		if data.XHTTPMode == "" {
-			data.XHTTPMode = "auto"
+	if strings.EqualFold(data.Net, "xhttp") || strings.EqualFold(data.Net, "splithttp") {
+		if err := data.parseXHTTPQuery(u.Query()); err != nil {
+			return nil, err
 		}
 	}
 	return data, nil
@@ -296,6 +302,12 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 		// the same link also works with external V2Fly and older Xray cores.
 		if strings.EqualFold(network, "raw") {
 			network = "tcp"
+		}
+		if strings.EqualFold(network, "xhttp") || strings.EqualFold(network, "splithttp") {
+			network = "xhttp"
+			if err := v.validateXHTTPCore(info); err != nil {
+				return Configuration{}, err
+			}
 		}
 		if l := len([]byte(id)); l < 32 || l > 36 {
 			id = common.StringToUUID5(id)
@@ -452,17 +464,9 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 				Security: v.QuicSecurity,
 			}
 		case "xhttp":
-			if v.Host != "" {
-				core.StreamSettings.XHTTPSettings = &coreObj.XHTTPSettings{
-					Path: v.Path,
-					Host: v.Host,
-					Mode: v.XHTTPMode,
-				}
-			} else {
-				core.StreamSettings.XHTTPSettings = &coreObj.XHTTPSettings{
-					Path: v.Path,
-					Mode: v.XHTTPMode,
-				}
+			core.StreamSettings.XHTTPSettings = &coreObj.XHTTPSettings{
+				Path: v.Path, Host: v.Host, Mode: v.XHTTPMode,
+				Extra: append(json.RawMessage(nil), v.XHTTPExtra...),
 			}
 		default:
 			return Configuration{}, fmt.Errorf("unexpected transport type: %v", v.Net)
@@ -559,10 +563,12 @@ func (v *V2Ray) ExportToURL() string {
 			setValue(&query, "headerType", v.Type)
 			setValue(&query, "key", v.Key)
 			setValue(&query, "quicSecurity", v.QuicSecurity)
-		case "xhttp":
+		case "xhttp", "splithttp":
+			setValue(&query, "type", "xhttp")
 			setValue(&query, "path", v.Path)
 			setValue(&query, "host", v.Host)
-			setValue(&query, "xhttpMode", v.XHTTPMode)
+			setValue(&query, "mode", v.XHTTPMode)
+			setValue(&query, "extra", string(v.XHTTPExtra))
 		}
 		if v.TLS != "none" {
 			setValue(&query, "sni", v.SNI)

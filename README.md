@@ -199,6 +199,14 @@ Nodes using [VLESS Encryption](https://xtls.github.io/config/outbounds/vless.htm
 
 On the Docker Proxies tab, **PING** checks the node's TCP connection, while **HTTP** checks each running container's actual SOCKS5 proxy, including its selected core, configuration, and front proxy. HTTP tests use temporary `curlimages/curl:latest` containers in the proxy's network namespace; the first test may need to download this image (or run `docker pull curlimages/curl:latest` in advance). Tests do not restart proxies or the main core. Paused, stopped, and missing containers are reported separately. The regular node list's HTTP test continues to use the main service core.
 
+### XHTTP Advanced Settings
+
+The VLESS and VMess node editor accepts an XHTTP advanced JSON object, including `headers`, `xmux`, padding options, and `downloadSettings`. Enter the Xray `xhttpSettings.extra` object; use the separate Host, Path, and Mode fields for base settings. Import, storage, editing, and sharing preserve unknown extensions and explicit `false`, `0`, and `-1` values. Clearing the advanced field and saving removes those settings.
+
+VLESS links use standard `mode` and URL-encoded `extra` parameters, while older `xhttpMode`, `xhttpRawJson`, and upstream flattened fields remain supported. Previously discarded advanced settings can be recovered from a node's stored original URI when available. **Xray is required**; known version requirements are checked for the selected features, and Docker proxies are validated against their actual image before creation or replacement. Update an old image with `docker pull teddysun/xray:latest`. Edit and save existing Docker proxies to regenerate their configuration.
+
+Run `scripts/test-xhttp-docker.sh` for an isolated HTTP integration test with real Xray containers. It requires Docker and Go, creates temporary containers on an internal network, and publishes no host ports. See the [upstream migration roadmap](docs/upstream-migration.md) (Chinese) for the SQLite and UI assessment, implementation sequence, and acceptance criteria.
+
 ### Configuration Volume Isolation
 Each Docker Proxy container gets its own named volume (`v2raya-socks-<port>`) with the generated config written via an `alpine` helper container (since `v2fly-core` uses a distroless image without a shell).
 
