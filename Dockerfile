@@ -1,4 +1,4 @@
-FROM alpine AS version
+FROM --platform=$BUILDPLATFORM alpine AS version
 WORKDIR /build
 COPY . /build
 RUN apk add --no-cache git 2>/dev/null || true
@@ -14,7 +14,8 @@ RUN VERSION=$(cat ./version); \
     fi
 
 
-FROM node:20-alpine AS builder-web
+# Static web assets are shared by every target; avoid running Node under QEMU.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder-web
 ADD gui /build/gui
 WORKDIR /build/gui
 RUN echo "network-timeout 600000" >> .yarnrc
@@ -22,12 +23,14 @@ RUN echo "network-timeout 600000" >> .yarnrc
 #RUN yarn config set sass_binary_site https://cdn.npm.taobao.org/dist/node-sass -g
 RUN yarn cache clean && yarn install --ignore-engines && yarn build
 
-FROM golang:alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 ADD service /build/service
 WORKDIR /build/service
 COPY --from=version /build/version ./
 COPY --from=builder-web /build/web server/router/web
-RUN CGO_ENABLED=0 go build -ldflags="-X github.com/v2rayA/v2rayA/conf.Version=$(cat ./version) -s -w" -o v2raya-plus .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-X github.com/v2rayA/v2rayA/conf.Version=$(cat ./version) -s -w" -o v2raya-plus .
 
 FROM teddysun/xray:latest AS xray-core
 
