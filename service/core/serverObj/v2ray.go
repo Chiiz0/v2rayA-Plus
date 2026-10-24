@@ -16,7 +16,9 @@ import (
 	"github.com/v2rayA/v2rayA/common"
 	"github.com/v2rayA/v2rayA/common/ntp"
 	"github.com/v2rayA/v2rayA/core/coreObj"
+	"github.com/v2rayA/v2rayA/core/v2ray/where"
 	"github.com/v2rayA/v2rayA/pkg/util/log"
+	"golang.org/x/mod/semver"
 )
 
 func init() {
@@ -37,6 +39,7 @@ type V2Ray struct {
 	ID            string `json:"id"`
 	Aid           string `json:"aid"`
 	Security      string `json:"scy"`
+	Encryption    string `json:"encryption,omitempty"`
 	Net           string `json:"net"`
 	Type          string `json:"type"`
 	Host          string `json:"host"`
@@ -55,6 +58,51 @@ type V2Ray struct {
 	XHTTPMode     string `json:"xhttpMode,omitempty"`
 	V             string `json:"v"`
 	Protocol      string `json:"protocol"`
+}
+
+func (v *V2Ray) UnmarshalJSON(data []byte) error {
+	type plainV2Ray V2Ray
+	var decoded plainV2Ray
+	if err := jsoniter.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*v = V2Ray(decoded)
+	if strings.EqualFold(v.Protocol, "vless") {
+		// An explicit empty value disables encryption; only older records that
+		// omit the field should recover it from the original imported URI.
+		if gjson.GetBytes(data, "encryption").Exists() && v.Encryption == "" {
+			v.Encryption = "none"
+		} else {
+			v.Encryption = v.vlessEncryption()
+		}
+	}
+	return nil
+}
+
+func (v *V2Ray) vlessEncryption() string {
+	if v.Encryption != "" {
+		return v.Encryption
+	}
+	// Older database records only kept this parameter in the original URI.
+	if u, err := url.Parse(v.V); err == nil && u.Scheme == "vless" {
+		if encryption := u.Query().Get("encryption"); encryption != "" {
+			return encryption
+		}
+	}
+	return "none"
+}
+
+func validateVLESSEncryptionCore(info PriorInfo) error {
+	if info.Variant != where.Xray {
+		return fmt.Errorf("VLESS Encryption requires Xray; please select an Xray core")
+	}
+	// VLESS Encryption first shipped in Xray v25.8.29 (XTLS/Xray-core#5067).
+	// Unknown/custom versions are left to the core's own config validation.
+	version := "v" + strings.TrimPrefix(info.CoreVersion, "v")
+	if semver.IsValid(version) && semver.Compare(version, "v25.8.29") < 0 {
+		return fmt.Errorf("VLESS Encryption requires Xray 25.8.29 or newer; detected %s", info.CoreVersion)
+	}
+	return nil
 }
 
 func NewV2Ray(link string) (ServerObj, error) {
@@ -77,6 +125,7 @@ func ParseVlessURL(vless string) (data *V2Ray, err error) {
 		Port:          u.Port(),
 		ID:            u.User.String(),
 		Aid:           u.Query().Get("aid"),
+		Encryption:    u.Query().Get("encryption"),
 		Net:           u.Query().Get("type"),
 		Type:          u.Query().Get("headerType"),
 		Host:          u.Query().Get("host"),
@@ -93,6 +142,9 @@ func ParseVlessURL(vless string) (data *V2Ray, err error) {
 		Key:           u.Query().Get("key"),
 		V:             vless,
 		Protocol:      "vless",
+	}
+	if data.Encryption == "" {
+		data.Encryption = "none"
 	}
 	if data.Net == "" {
 		data.Net = "tcp"
@@ -258,9 +310,11 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 				},
 			}
 		case "vless":
-			security := v.Security
-			if security == "" {
-				security = "auto"
+			encryption := v.vlessEncryption()
+			if encryption != "none" {
+				if err := validateVLESSEncryptionCore(info); err != nil {
+					return Configuration{}, err
+				}
 			}
 			core.Settings.Vnext = []coreObj.Vnext{
 				{
@@ -269,19 +323,19 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 					Users: []coreObj.User{
 						{
 							ID:         id,
-							Encryption: "none",
+							Encryption: encryption,
 						},
 					},
 				},
 			}
-		// if network == "tcp" {
-		// 	tcpSetting := coreObj.TCPSettings{
-		// 		Header: coreObj.TCPHeader{
-		// 			Type: "none",
-		// 		},
-		// 	}
-		// 	core.StreamSettings.TCPSettings = &tcpSetting
-		// }
+			// if network == "tcp" {
+			// 	tcpSetting := coreObj.TCPSettings{
+			// 		Header: coreObj.TCPHeader{
+			// 			Type: "none",
+			// 		},
+			// 	}
+			// 	core.StreamSettings.TCPSettings = &tcpSetting
+			// }
 		}
 		// 根据传输协议(network)修改streamSettings
 		//TODO: QUIC
@@ -465,6 +519,8 @@ func (v *V2Ray) ExportToURL() string {
 		var query = make(url.Values)
 		setValue(&query, "type", v.Net)
 		setValue(&query, "security", v.TLS)
+		setValue(&query, "encryption", v.vlessEncryption())
+		setValue(&query, "flow", v.Flow)
 		switch v.Net {
 		case "websocket", "ws", "http", "h2":
 			setValue(&query, "path", v.Path)
@@ -488,7 +544,6 @@ func (v *V2Ray) ExportToURL() string {
 			setValue(&query, "xhttpMode", v.XHTTPMode)
 		}
 		if v.TLS != "none" {
-			setValue(&query, "flow", v.Flow)
 			setValue(&query, "sni", v.SNI)
 			setValue(&query, "alpn", v.Alpn)
 			setValue(&query, "allowInsecure", strconv.FormatBool(v.AllowInsecure))

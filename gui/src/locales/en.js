@@ -366,6 +366,10 @@ export default {
   dockerProxies: {
     tabLabel: "Docker Proxies",
     fieldLabel: "Docker Proxies ({count})",
+    nodePing: "PING (Node TCP)",
+    nodePingDescription: "PING tests the node's TCP connection.",
+    httpDescription:
+      "HTTP tests each running Docker proxy through its SOCKS5 port.",
     colPort: "Port",
     colServer: "Server",
     colContainer: "Container",

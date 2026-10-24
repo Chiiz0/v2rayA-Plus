@@ -188,6 +188,10 @@ IP Forward (`/proc/sys/net/ipv4/ip_forward`) is only written to `1` when explici
 ### Core Selection and Docker Proxy Images
 The main image bundles V2Fly and Xray, selected through `V2RAYA_CORE`. Each Docker proxy can independently select Auto, V2Fly, or Xray. Auto follows the main service core. V2Fly uses the image tag matching the running version (for example, `v2fly/v2fly-core:v5.41.0`) and falls back to `latest` when unavailable. Xray uses `teddysun/xray:latest`.
 
+Nodes using [VLESS Encryption](https://xtls.github.io/config/outbounds/vless.html#outboundconfigurationobject) require Xray 25.8.29 or newer. The `encryption` URI parameter is preserved through import, editing, sharing, and configuration generation; omitted values default to `none`. Before creating or replacing an encrypted VLESS Docker proxy, the actual Xray image validates its configuration. If validation fails, update the image with `docker pull teddysun/xray:latest` and check the node parameters. After upgrading v2rayA-Plus, edit and save existing Docker proxies to regenerate their configuration; encryption can be recovered from a node's stored original URI when it is still available.
+
+On the Docker Proxies tab, **PING** checks the node's TCP connection, while **HTTP** checks each running container's actual SOCKS5 proxy, including its selected core, configuration, and front proxy. HTTP tests use temporary `curlimages/curl:latest` containers in the proxy's network namespace; the first test may need to download this image (or run `docker pull curlimages/curl:latest` in advance). Tests do not restart proxies or the main core. Paused, stopped, and missing containers are reported separately. The regular node list's HTTP test continues to use the main service core.
+
 ### Configuration Volume Isolation
 Each Docker Proxy container gets its own named volume (`v2raya-socks-<port>`) with the generated config written via an `alpine` helper container (since `v2fly-core` uses a distroless image without a shell).
 

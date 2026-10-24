@@ -99,6 +99,18 @@
             </b-select>
           </b-field>
           <b-field
+            v-if="v2ray.protocol === 'vless'"
+            label="Encryption"
+            label-position="on-border"
+          >
+            <b-input
+              ref="v2ray_encryption"
+              v-model="v2ray.encryption"
+              placeholder="none"
+              expanded
+            />
+          </b-field>
+          <b-field
             v-show="v2ray.type !== 'dtls'"
             label="TLS"
             label-position="on-border"
@@ -153,7 +165,7 @@
             />
           </b-field>
           <b-field
-            v-if="v2ray.protocol === 'vless' && v2ray.tls !== 'none'"
+            v-if="v2ray.protocol === 'vless'"
             ref="v2ray_flow"
             label="Flow"
             label-position="on-border"
@@ -1196,6 +1208,7 @@ export default {
       spx: "",
       alpn: "",
       scy: "auto",
+      encryption: "none",
       v: "",
       allowInsecure: false,
       protocol: "vmess",
@@ -1381,6 +1394,7 @@ export default {
         obj.tls = obj.tls || "none";
         obj.type = obj.type || "none";
         obj.scy = obj.scy || "auto";
+        obj.encryption = "none";
         obj.protocol = obj.protocol || "vmess";
         return obj;
       } else if (url.toLowerCase().startsWith("vless://")) {
@@ -1390,6 +1404,7 @@ export default {
           add: u.host,
           port: u.port,
           id: decodeURIComponent(u.username),
+          encryption: u.params.encryption || "none",
           flow: u.params.flow || "",
           net: u.params.type || "tcp",
           type: u.params.headerType || "none",
@@ -1415,7 +1430,6 @@ export default {
         if (o.net === "mkcp" || o.net === "kcp") {
           o.path = u.params.seed;
         }
-        console.log(o);
         return o;
       } else if (url.toLowerCase().startsWith("ss://")) {
         let u = parseURL(url);
@@ -1622,6 +1636,7 @@ export default {
           // todo: support reality and xhttp
           // https://github.com/XTLS/Xray-core/discussions/716
           query = {
+            encryption: srcObj.encryption || "none",
             type: srcObj.net,
             flow: srcObj.flow || "",
             security: srcObj.tls,
@@ -1667,6 +1682,7 @@ export default {
         case "vmess":
           //https://github.com/2dust/v2rayN/wiki/%E5%88%86%E4%BA%AB%E9%93%BE%E6%8E%A5%E6%A0%BC%E5%BC%8F%E8%AF%B4%E6%98%8E(ver-2)
           obj = Object.assign({}, srcObj);
+          delete obj.encryption;
           switch (obj.net) {
             case "kcp":
             case "tcp":

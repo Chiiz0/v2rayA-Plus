@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,6 +21,20 @@ func GetDockerProxies(ctx *gin.Context) {
 		return
 	}
 	common.ResponseSuccess(ctx, proxies)
+}
+
+func GetDockerProxyHttpLatency(ctx *gin.Context) {
+	var ports []int
+	if err := json.Unmarshal([]byte(ctx.Query("ports")), &ports); err != nil {
+		common.ResponseError(ctx, fmt.Errorf("bad request: ports must be an array of Docker proxy ports"))
+		return
+	}
+	results, err := service.TestDockerProxyHttpLatency(ctx.Request.Context(), ports, 8*time.Second)
+	if err != nil {
+		common.ResponseError(ctx, err)
+		return
+	}
+	common.ResponseSuccess(ctx, gin.H{"proxies": results})
 }
 
 type postDockerProxyReq struct {

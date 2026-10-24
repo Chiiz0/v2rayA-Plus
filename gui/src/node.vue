@@ -81,10 +81,15 @@
               'not-display': !overHeight && !isCheckedRowsPingable(),
             }"
             :disabled="!isCheckedRowsPingable()"
+            :title="
+              isDockerTab ? $t('dockerProxies.nodePingDescription') : null
+            "
             @click="handleClickLatency(true)"
           >
             <i class="iconfont icon-wave" />
-            <span>PING</span>
+            <span>{{
+              isDockerTab ? $t("dockerProxies.nodePing") : "PING"
+            }}</span>
           </button>
           <button
             :class="{
@@ -95,6 +100,7 @@
               'not-display': !overHeight && !isCheckedRowsPingable(),
             }"
             :disabled="!isCheckedRowsPingable()"
+            :title="isDockerTab ? $t('dockerProxies.httpDescription') : null"
             @click="handleClickLatency(false)"
           >
             <i class="iconfont icon-wave" />
@@ -578,6 +584,10 @@
           </b-field>
         </b-tab-item>
         <b-tab-item :label="$t('dockerProxies.tabLabel')">
+          <p class="help">
+            {{ $t("dockerProxies.nodePingDescription") }}
+            {{ $t("dockerProxies.httpDescription") }}
+          </p>
           <b-field
             :label="
               $t('dockerProxies.fieldLabel', { count: dockerProxies.length })
@@ -1036,6 +1046,9 @@ export default {
     };
   },
   computed: {
+    isDockerTab() {
+      return this.tab === 2 + this.tableData.subscriptions.length;
+    },
     loadBalanceValid() {
       return localStorage["loadBalanceValid"] === "true";
     },
@@ -1695,36 +1708,48 @@ export default {
       }
     },
     handleClickLatency(ping) {
-      let touches;
-      if (this.tab === 2 + this.tableData.subscriptions.length) {
-        this.checkedRows.forEach((x) =>
-          this.$set(x, "pingLatency", "testing...")
-        );
-        touches = JSON.stringify(
-          this.checkedRows.map((x) => {
-            return {
-              id: x.which.id,
-              _type: x.which._type,
-              sub: x.which.sub !== undefined ? x.which.sub : null,
-            };
-          })
-        );
-      } else {
-        touches = JSON.stringify(
-          this.checkedRows.map((x) => {
-            let sub = this.tableData.subscriptions.findIndex((subscription) =>
-              subscription.servers.some((y) => x === y)
+      const isDocker = this.isDockerTab;
+      const dockerHttp = isDocker && !ping;
+      const selectedRows = [...this.checkedRows];
+      const ports = new Set(selectedRows.map((row) => row.port));
+      const dockerRows = () => [
+        ...new Set([
+          ...selectedRows,
+          ...this.dockerProxies.filter((row) => ports.has(row.port)),
+        ]),
+      ];
+      const whiches = dockerHttp
+        ? []
+        : selectedRows.map((row) => {
+            if (isDocker) {
+              return {
+                id: row.which.id,
+                _type: row.which._type,
+                sub: row.which.sub !== undefined ? row.which.sub : null,
+              };
+            }
+            const sub = this.tableData.subscriptions.findIndex((subscription) =>
+              subscription.servers.some((server) => row === server)
             );
             return {
-              id: x.id,
-              _type: x._type,
+              id: row.id,
+              _type: row._type,
               sub: sub === -1 ? null : sub,
             };
-          })
-        );
-        this.checkedRows.forEach((x) => (x.pingLatency = "testing..."));
-      }
-      let timerTip = setTimeout(() => {
+          });
+      selectedRows.forEach((row) =>
+        this.$set(row, "pingLatency", "testing...")
+      );
+      const showError = (message) => {
+        this.$buefy.toast.open({
+          message,
+          type: "is-warning",
+          position: "is-top",
+          queue: false,
+          duration: 5000,
+        });
+      };
+      const timerTip = setTimeout(() => {
         this.$buefy.toast.open({
           message: this.$t("latency.message"),
           type: "is-primary",
@@ -1733,11 +1758,18 @@ export default {
           queue: false,
         });
       }, 10 * 1200);
-      this.$axios({
-        url: apiRoot + (ping ? "/pingLatency" : "/httpLatency"),
-        params: {
-          whiches: touches,
-        },
+      return this.$axios({
+        method: "get",
+        url:
+          apiRoot +
+          (dockerHttp
+            ? "/dockerProxy/httpLatency"
+            : ping
+            ? "/pingLatency"
+            : "/httpLatency"),
+        params: dockerHttp
+          ? { ports: JSON.stringify([...ports]) }
+          : { whiches: JSON.stringify(whiches) },
         timeout: 0,
       })
         .then((res) => {
@@ -1745,41 +1777,52 @@ export default {
             res,
             this,
             () => {
-              res.data.data.whiches.forEach((x) => {
-                if (this.tab === 2 + this.tableData.subscriptions.length) {
-                  const row = this.dockerProxies.find((p) => {
-                    return (
-                      p.which.id === x.id &&
-                      p.which._type === x._type &&
-                      (x.sub === null || p.which.sub === x.sub)
-                    );
-                  });
-                  if (row) {
-                    this.$set(row, "pingLatency", x.pingLatency);
+              if (dockerHttp) {
+                const results = new Map(
+                  res.data.data.proxies.map((proxy) => [
+                    proxy.port,
+                    proxy.pingLatency,
+                  ])
+                );
+                dockerRows().forEach((row) => {
+                  if (results.has(row.port)) {
+                    this.$set(row, "pingLatency", results.get(row.port));
                   }
+                });
+                return;
+              }
+              res.data.data.whiches.forEach((result) => {
+                if (isDocker) {
+                  dockerRows().forEach((row) => {
+                    if (this.isSameDockerProxyWhich(row.which, result)) {
+                      this.$set(row, "pingLatency", result.pingLatency);
+                    }
+                  });
                 } else {
-                  let server = locateServer(this.tableData, x);
-                  server.pingLatency = x.pingLatency;
+                  const server = locateServer(this.tableData, result);
+                  if (server) {
+                    this.$set(server, "pingLatency", result.pingLatency);
+                  }
                 }
               });
-              this.updateConnectView();
+              if (!isDocker) {
+                this.updateConnectView();
+              }
             },
-            () => {
-              this.$buefy.toast.open({
-                message: res.data.message,
-                type: "is-warning",
-                position: "is-top",
-                queue: false,
-                duration: 5000,
-              });
-              this.checkedRows.forEach((x) => {
-                this.$set(x, "pingLatency", "");
-              });
-            }
+            () => showError(res.data?.message || this.$t("common.fail"))
           );
+        })
+        .catch((err) => {
+          showError(err.response?.data?.message || err.message);
         })
         .finally(() => {
           clearTimeout(timerTip);
+          const rows = isDocker ? dockerRows() : selectedRows;
+          rows.forEach((row) => {
+            if (row.pingLatency === "testing...") {
+              this.$set(row, "pingLatency", "");
+            }
+          });
         });
     },
     // eslint-disable-next-line no-unused-vars

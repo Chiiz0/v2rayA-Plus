@@ -368,6 +368,9 @@ export default {
   dockerProxies: {
     tabLabel: "Docker 代理",
     fieldLabel: "Docker 代理（{count} 个）",
+    nodePing: "PING（节点 TCP）",
+    nodePingDescription: "PING 测试节点的 TCP 连接。",
+    httpDescription: "HTTP 通过各自的 SOCKS5 端口测试实际运行的 Docker 代理。",
     colPort: "端口",
     colServer: "节点名称",
     colContainer: "容器名称",

@@ -55,6 +55,7 @@ type dockerProxyRuntime struct {
 	RequestedCore   configure.DockerProxyCore
 	ServerName      string
 	FrontServerName string
+	VLESSEncryption bool
 }
 
 type dockerProxyCoreRuntime struct {
@@ -139,9 +140,8 @@ func selectDockerProxyCore(core configure.DockerProxyCore, detectedVariant where
 		runtime.Variant = where.Xray
 		runtime.ImageName = "teddysun/xray:latest"
 		runtime.MountPath = "/etc/xray"
-		if detectedVariant == where.Xray {
-			runtime.CoreVersion = detectedVersion
-		}
+		// The Docker image can differ from the main service's Xray version.
+		// Validate encrypted VLESS configurations against the actual image.
 		return runtime, nil
 	}
 
@@ -191,7 +191,19 @@ func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which,
 	if err != nil {
 		return nil, err
 	}
-	c, err := sr.ServerObj.Configuration(serverObj.PriorInfo{
+	var front serverObj.ServerObj
+	if frontWhich != nil {
+		frontSr, err := frontWhich.LocateServerRaw()
+		if err != nil {
+			return nil, fmt.Errorf("failed to locate front server: %w", err)
+		}
+		front = frontSr.ServerObj
+	}
+	return buildDockerProxyRuntimeForServers(sr.ServerObj, front, coreRuntime)
+}
+
+func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRuntime dockerProxyCoreRuntime) (*dockerProxyRuntime, error) {
+	c, err := server.Configuration(serverObj.PriorInfo{
 		Variant:     coreRuntime.Variant,
 		CoreVersion: coreRuntime.CoreVersion,
 		Tag:         "proxy",
@@ -203,14 +215,10 @@ func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which,
 	var frontServerName string
 	var outbounds []coreObj.OutboundObject
 
-	if frontWhich != nil {
-		frontSr, err := frontWhich.LocateServerRaw()
-		if err != nil {
-			return nil, fmt.Errorf("failed to locate front server: %w", err)
-		}
-		frontServerName = frontSr.ServerObj.GetName()
+	if front != nil {
+		frontServerName = front.GetName()
 
-		frontC, err := frontSr.ServerObj.Configuration(serverObj.PriorInfo{
+		frontC, err := front.Configuration(serverObj.PriorInfo{
 			Variant:     coreRuntime.Variant,
 			CoreVersion: coreRuntime.CoreVersion,
 			Tag:         "pre-proxy",
@@ -280,6 +288,20 @@ func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which,
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
 	}
+	var vlessEncryption bool
+	for _, outbound := range outbounds {
+		if outbound.Protocol != "vless" {
+			continue
+		}
+		nextServers, _ := outbound.Settings.Vnext.([]coreObj.Vnext)
+		for _, next := range nextServers {
+			for _, user := range next.Users {
+				if user.Encryption != "" && user.Encryption != "none" {
+					vlessEncryption = true
+				}
+			}
+		}
+	}
 
 	return &dockerProxyRuntime{
 		ConfigBytes:     configBytes,
@@ -287,12 +309,34 @@ func buildDockerProxyRuntime(which configure.Which, frontWhich *configure.Which,
 		MountPath:       coreRuntime.MountPath,
 		Core:            coreRuntime.Core,
 		RequestedCore:   coreRuntime.RequestedCore,
-		ServerName:      sr.ServerObj.GetName(),
+		ServerName:      server.GetName(),
 		FrontServerName: frontServerName,
+		VLESSEncryption: vlessEncryption,
 	}, nil
 }
 
-func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolume bool, pauseAfterStart bool) error {
+func validateDockerProxyEncryption(runtime *dockerProxyRuntime) error {
+	if !runtime.VLESSEncryption {
+		return nil
+	}
+	if runtime.Core != configure.DockerProxyCoreXray {
+		return fmt.Errorf("VLESS Encryption requires Xray; select Xray for this Docker proxy")
+	}
+	cmd := exec.Command("docker", "run", "--rm", "--network", "none", "-i",
+		"--entrypoint", "xray", runtime.ImageName, "run", "-test", "-config", "stdin:")
+	cmd.Stdin = bytes.NewReader(runtime.ConfigBytes)
+	// Core diagnostics can include encryption credentials, so don't return them.
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to validate VLESS Encryption with Docker image %q; ensure Docker is available and update the Xray image to a version supporting the node's encryption settings: %w", runtime.ImageName, err)
+	}
+	return nil
+}
+
+func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolume bool, pauseAfterStart bool) (err error) {
+	// Check before removing the current container or changing its volume.
+	if err := validateDockerProxyEncryption(runtime); err != nil {
+		return err
+	}
 	containerName := fmt.Sprintf("v2raya-socks-%d", port)
 	volumeName := fmt.Sprintf("v2raya-socks-%d", port)
 
@@ -301,10 +345,15 @@ func setupDockerProxyRuntime(port int, runtime *dockerProxyRuntime, recreateVolu
 		_, _ = runDockerCmd("volume", "rm", "-f", volumeName)
 	}
 
-	_, err := runDockerCmd("volume", "create", volumeName)
+	_, err = runDockerCmd("volume", "create", volumeName)
 	if err != nil {
 		return fmt.Errorf("failed to create docker volume: %w", err)
 	}
+	defer func() {
+		if err != nil && recreateVolume {
+			_, _ = runDockerCmd("volume", "rm", "-f", volumeName)
+		}
+	}()
 
 	proxyNetwork := getDockerProxyNetwork()
 	if err = ensureDockerProxyNetwork(proxyNetwork); err != nil {
@@ -365,7 +414,6 @@ func CreateDockerProxy(which configure.Which, frontWhich *configure.Which, port 
 		return err
 	}
 	if err = setupDockerProxyRuntime(port, runtime, true, false); err != nil {
-		_, _ = runDockerCmd("volume", "rm", "-f", fmt.Sprintf("v2raya-socks-%d", port))
 		return err
 	}
 

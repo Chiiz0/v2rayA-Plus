@@ -188,6 +188,10 @@ IP 转发（`/proc/sys/net/ipv4/ip_forward`）仅在设置中**显式开启**时
 ### 内核选择与 Docker 代理镜像
 主镜像同时包含 V2Fly 和 Xray，通过 `V2RAYA_CORE` 选择主服务内核。每个 Docker 代理还可独立选择“自动 / V2Fly / Xray”：“自动”跟随主服务内核；V2Fly 使用当前运行版本对应的镜像 Tag（如 `v2fly/v2fly-core:v5.41.0`），版本无法获取时降级为 `latest`；Xray 使用 `teddysun/xray:latest`。
 
+使用 [VLESS Encryption](https://xtls.github.io/config/outbounds/vless.html#outboundconfigurationobject) 的节点需要 Xray 25.8.29 或更新版本。URI 中的 `encryption` 参数会在导入、编辑、分享和生成配置时完整保留，未提供时默认为 `none`。创建或替换此类 Docker 代理前，会先使用实际 Xray 镜像验证配置；验证失败时，请执行 `docker pull teddysun/xray:latest` 更新镜像并检查节点参数。升级 v2rayA-Plus 后，需编辑并保存已有 Docker 代理以重新生成配置；旧节点若仍保存原始 URI，可从中恢复加密参数。
+
+Docker 代理页的 **PING** 检查节点 TCP 连接，**HTTP** 则通过每个运行中容器的实际 SOCKS5 代理测试，使用该容器的内核、配置和前置代理链。HTTP 测试会启动临时 `curlimages/curl:latest` 容器，共享代理的网络命名空间；首次测试可能需要下载镜像，也可提前执行 `docker pull curlimages/curl:latest`。测试不会重启代理或主内核，并会分别显示暂停、停止和容器不存在的状态。普通节点列表中的 HTTP 测试仍使用主服务内核。
+
 ### 配置写入方案
 由于 `v2fly-core` 使用 Distroless 镜像（无 Shell 环境），通过 `alpine` 轻量辅助容器将节点配置写入各自的独立 Docker Volume（`v2raya-socks-<port>`），然后再挂载给代理容器运行。
 
