@@ -372,6 +372,7 @@ export default {
     realityPublicKey: "公钥（pbk）",
     realityShortId: "短 ID（sid）",
     realitySpiderX: "Spider X（spx）",
+    realityMldsa65Verify: "ML-DSA-65 验证公钥（pqv）",
     method: "方法",
     plugin: "插件",
     pluginImpl: "实现",

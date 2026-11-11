@@ -380,6 +380,7 @@ export default {
     realityPublicKey: "کلید عمومی (pbk)",
     realityShortId: "شناسه کوتاه (sid)",
     realitySpiderX: "Spider X (spx)",
+    realityMldsa65Verify: "کلید تأیید ML-DSA-65 (pqv)",
     method: "روش",
     plugin: "افزونه",
     pluginImpl: "پیاده‌سازی",

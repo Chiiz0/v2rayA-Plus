@@ -51,6 +51,7 @@ type V2Ray struct {
 	PublicKey     string          `json:"pbk,omitempty"`
 	ShortId       string          `json:"sid,omitempty"`
 	SpiderX       string          `json:"spx,omitempty"`
+	Mldsa65Verify string          `json:"pqv"` // Keep empty values so clearing cannot revive the original URI's key.
 	Flow          string          `json:"flow,omitempty"`
 	Alpn          string          `json:"alpn,omitempty"`
 	AllowInsecure bool            `json:"allowInsecure"`
@@ -70,6 +71,11 @@ func (v *V2Ray) UnmarshalJSON(data []byte) error {
 	}
 	*v = V2Ray(decoded)
 	if strings.EqualFold(v.Protocol, "vless") {
+		if !gjson.GetBytes(data, "pqv").Exists() {
+			if u, err := url.Parse(v.V); err == nil && u.Scheme == "vless" {
+				v.Mldsa65Verify = u.Query().Get("pqv")
+			}
+		}
 		// An explicit empty value disables encryption; only older records that
 		// omit the field should recover it from the original imported URI.
 		if gjson.GetBytes(data, "encryption").Exists() && v.Encryption == "" {
@@ -143,6 +149,7 @@ func ParseVlessURL(vless string) (data *V2Ray, err error) {
 		PublicKey:     u.Query().Get("pbk"),
 		ShortId:       u.Query().Get("sid"),
 		SpiderX:       u.Query().Get("spx"),
+		Mldsa65Verify: u.Query().Get("pqv"),
 		Flow:          u.Query().Get("flow"),
 		Alpn:          u.Query().Get("alpn"),
 		AllowInsecure: u.Query().Get("allowInsecure") == "true",
@@ -513,14 +520,20 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 				core.StreamSettings.XTLSSettings.Alpn = alpn
 			}
 		} else if strings.ToLower(v.TLS) == "reality" {
+			if v.Mldsa65Verify != "" {
+				if err := ValidateRealityMLDSA65Core(info); err != nil {
+					return Configuration{}, err
+				}
+			}
 			core.StreamSettings.Security = "reality"
 			core.StreamSettings.RealitySettings = &coreObj.RealitySettings{
-				ServerName:  v.SNI,
-				Fingerprint: v.Fingerprint,
-				Show:        false,
-				PublicKey:   v.PublicKey,
-				ShortID:     v.ShortId,
-				SpiderX:     v.SpiderX,
+				ServerName:    v.SNI,
+				Fingerprint:   v.Fingerprint,
+				Show:          false,
+				PublicKey:     v.PublicKey,
+				ShortID:       v.ShortId,
+				SpiderX:       v.SpiderX,
+				Mldsa65Verify: v.Mldsa65Verify,
 			}
 		}
 		// Flow
@@ -579,6 +592,7 @@ func (v *V2Ray) ExportToURL() string {
 				setValue(&query, "pbk", v.PublicKey)
 				setValue(&query, "sid", v.ShortId)
 				setValue(&query, "spx", v.SpiderX)
+				setValue(&query, "pqv", v.Mldsa65Verify)
 			}
 		}
 

@@ -78,6 +78,7 @@ export function parseShareLink(url: string): ShareForm | null {
       pbk: u.params.pbk || "",
       sid: u.params.sid || "",
       spx: u.params.spx || "",
+      pqv: u.params.pqv || "",
       pinnedPeerCertSha256: u.params.pinnedPeerCertSha256 || "",
       verifyPeerCertByName: u.params.verifyPeerCertByName || "",
       key: u.params.key,
@@ -491,6 +492,7 @@ export function generateShareLink(srcObj: ShareForm): string | null {
         query.pbk = srcObj.pbk;
         query.sid = srcObj.sid;
         query.spx = srcObj.spx;
+        if (srcObj.pqv) query.pqv = srcObj.pqv;
       }
       return buildURL({
         protocol: "vless",

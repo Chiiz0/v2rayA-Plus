@@ -198,6 +198,13 @@
           >
             <b-input v-model="v2ray.spx" placeholder="spx" expanded />
           </b-field>
+          <b-field
+            v-show="v2ray.tls === 'reality'"
+            label="ML-DSA-65 (pqv)"
+            horizontal
+          >
+            <b-input v-model="v2ray.pqv" placeholder="pqv" expanded />
+          </b-field>
           <b-field v-show="v2ray.tls !== 'none'" label-position="on-border">
             <template slot="label">
               AllowInsecure
@@ -1228,6 +1235,7 @@ export default {
       pbk: "",
       sid: "",
       spx: "",
+      pqv: "",
       alpn: "",
       scy: "auto",
       encryption: "none",
@@ -1533,6 +1541,7 @@ export default {
           pbk: u.params.pbk || "",
           sid: u.params.sid || "",
           spx: u.params.spx || "",
+          pqv: u.params.pqv || "",
           allowInsecure: u.params.allowInsecure || false,
           key: u.params.key,
           xhttpMode: u.params.xhttpMode || "auto",
@@ -1793,6 +1802,7 @@ export default {
             query.pbk = srcObj.pbk;
             query.sid = srcObj.sid;
             query.spx = srcObj.spx;
+            if (srcObj.pqv) query.pqv = srcObj.pqv;
           }
           return generateURL({
             protocol: "vless",

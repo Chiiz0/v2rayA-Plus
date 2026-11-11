@@ -61,7 +61,8 @@ func persistXHTTPFixture(t *testing.T, value interface{}) []byte {
 func TestXHTTPBoltServerAndSubscriptionRoundTrip(t *testing.T) {
 	const extra = `{"future":9007199254740993,"noGRPCHeader":false,"scMinPostsIntervalMs":0,"xmux":{"hKeepAlivePeriod":-1}}`
 	const encryption = "mlkem768x25519plus.native.0rtt.test+public/key="
-	link := "vless://11111111-1111-4111-8111-111111111111@example.com:443?type=xhttp&security=none&mode=packet-up&extra=" + url.QueryEscape(extra) + "&encryption=" + url.QueryEscape(encryption)
+	const pqv = "test-verification-key+base64/="
+	link := "vless://11111111-1111-4111-8111-111111111111@example.com:443?type=xhttp&security=reality&mode=packet-up&extra=" + url.QueryEscape(extra) + "&encryption=" + url.QueryEscape(encryption) + "&pqv=" + url.QueryEscape(pqv)
 	parsed, err := serverObj.ParseVlessURL(link)
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +80,7 @@ func TestXHTTPBoltServerAndSubscriptionRoundTrip(t *testing.T) {
 			if kind == "legacy URI" {
 				delete(fields, "xhttpExtra")
 				delete(fields, "encryption")
+				delete(fields, "pqv")
 				fields["xhttpMode"] = json.RawMessage(`"auto"`)
 			} else if kind == "explicit empty object" {
 				fields["xhttpExtra"] = json.RawMessage(`{}`)
@@ -114,12 +116,15 @@ func TestXHTTPBoltServerAndSubscriptionRoundTrip(t *testing.T) {
 							loaded, value = *node, node
 						}
 						node := loaded.ServerObj.(*serverObj.V2Ray)
-						if loaded.Latency != "123ms" || node.Encryption != encryption || node.XHTTPMode != "packet-up" {
+						if loaded.Latency != "123ms" || node.Encryption != encryption || node.XHTTPMode != "packet-up" || node.Mldsa65Verify != pqv {
 							t.Fatalf("stored metadata or protocol fields changed: %+v", node)
 						}
 						shared, err := serverObj.ParseVlessURL(node.ExportToURL())
 						if err != nil {
 							t.Fatal(err)
+						}
+						if shared.Mldsa65Verify != pqv {
+							t.Fatal("stored node's share link lost its verification key")
 						}
 						for _, got := range []json.RawMessage{node.XHTTPExtra, shared.XHTTPExtra} {
 							if kind == "explicit empty object" {

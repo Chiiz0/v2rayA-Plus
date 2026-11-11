@@ -156,6 +156,32 @@ const vmessXhttpLink = (extra, fields = {}) => {
   );
 };
 (async () => {
+  const pqv = "verify_-".repeat(450) + "+/=";
+  const reality = setup();
+  const loaded = editor.mounted.call(reality);
+  reality.requests[0].resolve({
+    data: {
+      code: "SUCCESS",
+      data: {
+        sharingAddress:
+          link.replace("security=none", "security=reality") +
+          "&pqv=" +
+          encodeURIComponent(pqv),
+      },
+    },
+  });
+  await loaded;
+  assert.equal(reality.v2ray.pqv, pqv);
+  reality.v2ray.ps = "renamed";
+  await reality.handleClickSubmit();
+  const savedReality = reality.resolveURL(reality.emitted[0][1]);
+  assert.equal(savedReality.pqv, pqv);
+  assert.equal(savedReality.ps, "renamed");
+  assert.equal(savedReality.encryption, reality.v2ray.encryption);
+  reality.v2ray.pqv = "";
+  const clearedReality = reality.generateURL(reality.v2ray);
+  assert.equal(new URL(clearedReality).searchParams.has("pqv"), false);
+  assert.equal(reality.resolveURL(clearedReality).pqv, "");
   const extra =
     '{"noGRPCHeader":false,"noSSEHeader":false,"scMaxBufferedPosts":0,"scMaxEachPostBytes":"1000-2000","scMinPostsIntervalMs":"-1--1","xPaddingBytes":0,"xmux":{"maxConcurrency":0,"maxConnections":"2-4","hKeepAlivePeriod":-1},"headers":{"X-Test":"a:b},\\"+%=/"},"unknown":{"large":9007199254740993,"enabled":false,"values":[0,-1,null]},"downloadSettings":{"network":"xhttp","address":"download.example","port":443,"xhttpSettings":{"path":"/down","mode":"stream-up","extra":{"unknownNested":{"v":0},"noSSEHeader":false}}}}';
   for (const protocol of ["vless", "vmess"]) {

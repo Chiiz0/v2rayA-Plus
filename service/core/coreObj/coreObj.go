@@ -158,12 +158,13 @@ type StreamSettings struct {
 	Sockopt         *Sockopt         `json:"sockopt,omitempty"`
 }
 type RealitySettings struct {
-	ServerName  string `json:"serverName,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Show        bool   `json:"show,omitempty"`
-	PublicKey   string `json:"publicKey,omitempty"`
-	ShortID     string `json:"shortId,omitempty"`
-	SpiderX     string `json:"spiderX,omitempty"`
+	ServerName    string `json:"serverName,omitempty"`
+	Fingerprint   string `json:"fingerprint,omitempty"`
+	Show          bool   `json:"show,omitempty"`
+	PublicKey     string `json:"publicKey,omitempty"`
+	ShortID       string `json:"shortId,omitempty"`
+	SpiderX       string `json:"spiderX,omitempty"`
+	Mldsa65Verify string `json:"mldsa65Verify,omitempty"`
 }
 type GrpcSettings struct {
 	ServiceName string `json:"serviceName"`

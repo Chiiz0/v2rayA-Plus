@@ -16,6 +16,24 @@ const vmess = (raw = extra) =>
       "}",
   );
 
+test("REALITY pqv survives rename and can be cleared without changing encryption", () => {
+  const pqv = "verify_-".repeat(450) + "+/=";
+  const model = parseShareLink(
+    "vless://id@example.com:443?security=reality&pbk=public&sid=ab&encryption=mlkem768x25519plus.native.0rtt.key&pqv=" +
+      encodeURIComponent(pqv),
+  )!;
+  expect(model.pqv).toBe(pqv);
+  model.ps = "renamed";
+  const saved = parseShareLink(generateShareLink(model)!)!;
+  expect(saved.pqv).toBe(pqv);
+  expect(saved.ps).toBe("renamed");
+  expect(saved.encryption).toBe(model.encryption);
+  model.pqv = "";
+  const cleared = generateShareLink(model)!;
+  expect(parseURL(cleared).params.pqv).toBeUndefined();
+  expect(parseShareLink(cleared)!.pqv).toBe("");
+});
+
 for (const [protocol, link] of Object.entries({
   vless: vless(),
   vmess: vmess(),

@@ -62,6 +62,7 @@ type dockerProxyRuntime struct {
 	FrontServerName string
 	VLESSEncryption bool
 	XHTTP           bool
+	RealityMLDSA65  bool
 }
 
 type dockerProxyCoreRuntime struct {
@@ -341,8 +342,11 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
 	}
-	var vlessEncryption, xhttp bool
+	var vlessEncryption, xhttp, realityMLDSA65 bool
 	for _, outbound := range outbounds {
+		if stream := outbound.StreamSettings; stream != nil && stream.RealitySettings != nil && stream.RealitySettings.Mldsa65Verify != "" {
+			realityMLDSA65 = true
+		}
 		if outbound.StreamSettings != nil && strings.EqualFold(outbound.StreamSettings.Network, "xhttp") {
 			xhttp = true
 		}
@@ -369,6 +373,7 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 		FrontServerName: frontServerName,
 		VLESSEncryption: vlessEncryption,
 		XHTTP:           xhttp,
+		RealityMLDSA65:  realityMLDSA65,
 	}, nil
 }
 
@@ -433,6 +438,9 @@ func validateDockerProxyConfigContext(ctx context.Context, runtime *dockerProxyR
 	if runtime.XHTTP {
 		features = append(features, "XHTTP")
 	}
+	if runtime.RealityMLDSA65 {
+		features = append(features, "REALITY ML-DSA-65")
+	}
 	if len(features) == 0 {
 		return nil
 	}
@@ -440,7 +448,7 @@ func validateDockerProxyConfigContext(ctx context.Context, runtime *dockerProxyR
 	if runtime.Core != configure.DockerProxyCoreXray {
 		return fmt.Errorf("%s requires Xray; select Xray for this Docker proxy", feature)
 	}
-	if runtime.XHTTP {
+	if runtime.XHTTP || runtime.RealityMLDSA65 {
 		output, err := runDockerProxyCoreCheck(ctx, runtime.ImageName, nil, "version")
 		if err != nil {
 			return fmt.Errorf("failed to read Xray version from Docker image %q: %w", runtime.ImageName, err)
@@ -448,6 +456,11 @@ func validateDockerProxyConfigContext(ctx context.Context, runtime *dockerProxyR
 		fields := strings.Fields(string(output))
 		if len(fields) < 2 || !strings.EqualFold(fields[0], "Xray") || !semver.IsValid("v"+strings.TrimPrefix(fields[1], "v")) {
 			return fmt.Errorf("cannot determine Xray version from Docker image %q; update the image", runtime.ImageName)
+		}
+		if runtime.RealityMLDSA65 {
+			if err := serverObj.ValidateRealityMLDSA65Core(serverObj.PriorInfo{Variant: where.Xray, CoreVersion: fields[1]}); err != nil {
+				return fmt.Errorf("Docker Xray image %q: %w", runtime.ImageName, err)
+			}
 		}
 		var config SimpleConfig
 		if err := json.Unmarshal(runtime.ConfigBytes, &config); err != nil {

@@ -387,6 +387,7 @@ export default {
     realityPublicKey: "Chave pública (pbk)",
     realityShortId: "ID curto (sid)",
     realitySpiderX: "Spider X (spx)",
+    realityMldsa65Verify: "Chave de verificação ML-DSA-65 (pqv)",
     method: "Método",
     plugin: "Plugin",
     pluginImpl: "Implementação",

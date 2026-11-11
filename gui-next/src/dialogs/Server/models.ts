@@ -22,6 +22,7 @@ export const v2rayModel = () => ({
   pbk: "",
   sid: "",
   spx: "",
+  pqv: "",
   alpn: "",
   scy: "auto",
   v: "",

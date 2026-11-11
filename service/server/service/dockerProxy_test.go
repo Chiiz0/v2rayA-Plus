@@ -176,10 +176,12 @@ func TestDockerProxyConfigValidation(t *testing.T) {
 		name      string
 		encrypted bool
 		xhttp     bool
+		reality   bool
 	}{
 		{name: "VLESS Encryption", encrypted: true},
 		{name: "XHTTP", xhttp: true},
 		{name: "VLESS Encryption / XHTTP", encrypted: true, xhttp: true},
+		{name: "REALITY ML-DSA-65", reality: true},
 	} {
 		for _, fail := range []bool{false, true} {
 			name := "supported image"
@@ -202,6 +204,7 @@ func TestDockerProxyConfigValidation(t *testing.T) {
 				proxy := &dockerProxyRuntime{
 					ConfigBytes: []byte(`{"outbounds":[]}`), Core: configure.DockerProxyCoreXray,
 					ImageName: "teddysun/xray:latest", VLESSEncryption: feature.encrypted, XHTTP: feature.xhttp,
+					RealityMLDSA65: feature.reality,
 				}
 				var err error
 				if fail {
@@ -220,7 +223,7 @@ func TestDockerProxyConfigValidation(t *testing.T) {
 					t.Fatal(err)
 				}
 				want := "run --rm --network none -i --entrypoint xray teddysun/xray:latest run -test -config stdin:"
-				if feature.xhttp {
+				if feature.xhttp || feature.reality {
 					want = "run --rm --network none --entrypoint xray teddysun/xray:latest version\n" + want
 				}
 				if got := dockerProxyCheckCommands(t, commands); got != want {
