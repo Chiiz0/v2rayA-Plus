@@ -316,6 +316,8 @@ export default {
     errNoRules: "دست‌کم یک قانون به سرور DNS نیاز دارد",
   },
   configureServer: {
+    visionHint:
+      "Vision به Xray نیاز دارد. شنود پروکسی شفاف به‌طور خودکار از RouteOnly برای حفظ مقصد اصلی استفاده می‌کند. برای سرویس اصلی V2RAYA_CORE=xray را تنظیم و سرویس را بازراه‌اندازی کنید؛ برای پروکسی Docker گزینه Xray را انتخاب کنید.",
     required: "الزامی",
     minValue: "باید حداقل {value} باشد",
     title: "پیکربندی سرور",

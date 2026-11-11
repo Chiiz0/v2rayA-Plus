@@ -240,6 +240,7 @@ export default {
     ],
   },
   configureServer: {
+    visionHint: "Vision requer Xray. A inspeção do proxy transparente usa RouteOnly automaticamente para preservar o destino original. No serviço principal, defina V2RAYA_CORE=xray e reinicie; nos proxies Docker, selecione Xray.",
     title: "Configurar Servidor | Servidor",
     servername: "Nome do Servidor",
     port: "Porta",

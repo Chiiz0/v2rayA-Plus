@@ -323,6 +323,8 @@ export default {
     errNoRules: "Pelo menos uma regra precisa de um servidor DNS",
   },
   configureServer: {
+    visionHint:
+      "Vision requer Xray. A inspeção do proxy transparente usa RouteOnly automaticamente para preservar o destino original. No serviço principal, defina V2RAYA_CORE=xray e reinicie; nos proxies Docker, selecione Xray.",
     required: "Obrigatório",
     minValue: "Deve ser pelo menos {value}",
     title: "Configurar servidor",

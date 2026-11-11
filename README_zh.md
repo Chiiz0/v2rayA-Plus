@@ -39,11 +39,19 @@ docker compose up -d
 # 浏览器访问: http://localhost:2017
 ```
 
-镜像同时内置 V2Fly 与 Xray。默认使用 V2Fly；需要让主连接和透明代理使用 Xray（例如 VLESS Vision / REALITY 节点）时：
+镜像同时内置 V2Fly 与 Xray。默认 `V2RAYA_CORE=auto` 优先使用内置 Xray，仅在找不到 Xray 时回退到 V2Fly；显式指定的内核或二进制仍优先。已有部署若固定为 V2Fly，使用 Vision / REALITY 节点时需切换：
 
 ```bash
 V2RAYA_CORE=xray docker compose up -d
 ```
+
+所选内核不是 Xray 时，Vision 节点会在启动前返回明确错误，测速和 Docker 前置代理也会检查。不会静默删除 flow，因为它必须与服务端匹配。存在 Vision 出站时，已启用的透明代理嗅探会自动使用 `routeOnly: true`；关闭嗅探仍保持关闭，普通节点保留用户的 RouteOnly 设置。默认 `info` 日志级别保留核心错误输出；`warn` / `error` 仍按严重程度过滤。
+
+V2Fly 5.41.0 [未编码 Vision flow，也未实现其数据帧处理](https://github.com/v2fly/v2ray-core/blob/v5.41.0/proxy/vless/encoding/addons.go)，仅改 RouteOnly 不能补齐支持。Xray [会缓存并回放嗅探数据](https://github.com/XTLS/Xray-core/blob/main/app/dispatcher/default.go)；RouteOnly 控制是否改写目标地址，不能将 EOF 简单归因为 ClientHello 被嗅探吃掉。
+
+可运行 `V2RAYA_VISION_TEST_IMAGE=<本地主镜像> bash scripts/test-vision-transparent.sh` 做真实核心回归，需要 Go、Docker 以及包含 Xray、V2Fly 5.41.0、nft 的镜像。测试在 `--network none` 的临时容器里验证 nft redirect、域名嗅探及本地 TLS，并包含 V2Fly EOF 对照，不修改宿主机防火墙。
+
+v2.6.1 修复 Vision 透明代理兼容问题。已有部署请按[发布说明与升级步骤](docs/releases.md#旧部署升级到-v261)更新；旧 Compose 中写死的 V2Fly 不会因拉取镜像自动切换。
 
 ### 界面与数据后端
 
@@ -149,7 +157,7 @@ Docker 代理引用的节点或所属订阅不能直接删除，前置节点同�
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `V2RAYA_CONFIG` | `/etc/v2raya-plus` | v2rayA-Plus 配置和数据库的存储路径 |
-| `V2RAYA_CORE` | `v2fly` | 主服务内核：`auto`、`v2fly` 或 `xray`；Vision / REALITY 节点应使用 `xray` |
+| `V2RAYA_CORE` | `auto` | 主服务内核：`auto`、`v2fly` 或 `xray`；Vision / REALITY 节点应使用 `xray` |
 | `V2RAYA_ADDRESS` | `0.0.0.0:2017` | Web 服务监听地址和端口 |
 | `V2RAYA_LOG_LEVEL` | `info` | 日志级别：`trace`、`debug`、`info`、`warn`、`error` |
 | `V2RAYA_DOCKER_PROXY_NETWORK` | `v2raya-plus-proxy` | Docker 代理节点容器使用的专用网络 |

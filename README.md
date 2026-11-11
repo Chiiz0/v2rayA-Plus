@@ -39,11 +39,19 @@ docker compose up -d
 # Navigate to: http://localhost:2017
 ```
 
-The image bundles both V2Fly and Xray. V2Fly remains the default; to use Xray for the main connection and transparent proxy (for example, VLESS Vision / REALITY nodes), run:
+The image bundles both V2Fly and Xray. The default `V2RAYA_CORE=auto` prefers the bundled Xray, falling back to V2Fly only when Xray is absent. Explicit core/binary selections are respected. For an existing deployment pinned to V2Fly, switch Vision / REALITY nodes to Xray:
 
 ```bash
 V2RAYA_CORE=xray docker compose up -d
 ```
+
+Vision nodes are rejected before startup when the selected core is not Xray, including latency tests and Docker front proxies. Flow is never silently removed: it must match the server. For Vision outbounds, enabled transparent sniffing automatically uses `routeOnly: true`; disabled sniffing stays disabled. Other nodes retain their RouteOnly preference. Core errors remain enabled at the default `info` log level; `warn` / `error` still filter by severity.
+
+V2Fly 5.41.0 [does not encode the Vision flow or implement its body framing](https://github.com/v2fly/v2ray-core/blob/v5.41.0/proxy/vless/encoding/addons.go). Changing RouteOnly alone cannot add this support. Xray [caches and replays sniffed bytes](https://github.com/XTLS/Xray-core/blob/main/app/dispatcher/default.go); RouteOnly controls destination rewriting, not whether ClientHello bytes are consumed.
+
+Run `V2RAYA_VISION_TEST_IMAGE=<local-main-image> bash scripts/test-vision-transparent.sh` for the real-core regression (Go and Docker required). The image must contain Xray, V2Fly 5.41.0, and nft. It verifies local TLS over nft redirect and domain sniffing, including V2Fly EOF controls, inside a disposable container with `--network none`; it does not change the host firewall.
+
+v2.6.1 fixes Vision transparent proxy compatibility. See the [release notes and existing-deployment upgrade steps](docs/releases.md#旧部署升级到-v261) (Chinese). Pulling the image does not override a core pinned to V2Fly in an old Compose file.
 
 ### Interfaces and database backend
 
@@ -149,7 +157,7 @@ Deleting nodes or subscriptions used by a Docker proxy is blocked, including fro
 | Variable | Default | Description |
 |---|---|---|
 | `V2RAYA_CONFIG` | `/etc/v2raya-plus` | Path where v2rayA-Plus stores its configuration and database |
-| `V2RAYA_CORE` | `v2fly` | Main service core: `auto`, `v2fly`, or `xray`; Vision / REALITY nodes should use `xray` |
+| `V2RAYA_CORE` | `auto` | Main service core: `auto`, `v2fly`, or `xray`; Vision / REALITY nodes should use `xray` |
 | `V2RAYA_ADDRESS` | `0.0.0.0:2017` | Address and port the web service listens on |
 | `V2RAYA_LOG_LEVEL` | `info` | Log verbosity: `trace`, `debug`, `info`, `warn`, `error` |
 | `V2RAYA_DOCKER_PROXY_NETWORK` | `v2raya-plus-proxy` | Dedicated Docker network used by generated proxy node containers |

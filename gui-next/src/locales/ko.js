@@ -314,6 +314,8 @@ export default {
     errNoRules: "DNS 서버가 있는 규칙이 하나 이상 필요합니다",
   },
   configureServer: {
+    visionHint:
+      "Vision에는 Xray가 필요합니다. 투명 프록시 스니핑은 원래 목적지를 유지하도록 RouteOnly를 자동 적용합니다. 주 서비스는 V2RAYA_CORE=xray 설정 후 재시작하고 Docker 프록시는 Xray를 선택하세요.",
     required: "필수",
     minValue: "{value} 이상이어야 합니다",
     title: "서버 구성",

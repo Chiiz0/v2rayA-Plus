@@ -350,6 +350,11 @@ func (v *V2Ray) Configuration(info PriorInfo) (c Configuration, err error) {
 				},
 			}
 		case "vless":
+			// V2Fly accepts flow in JSON but does not implement Vision framing.
+			// Removing flow would also break servers that require Vision.
+			if coreObj.IsVisionFlow(v.Flow) && info.Variant != where.Xray {
+				return Configuration{}, fmt.Errorf("VLESS Vision requires Xray; set V2RAYA_CORE=xray and restart the main service, or select Xray for this Docker proxy (also check V2RAYA_V2RAY_BIN if set)")
+			}
 			encryption := v.vlessEncryption()
 			if encryption != "none" {
 				if err := validateVLESSEncryptionCore(info); err != nil {

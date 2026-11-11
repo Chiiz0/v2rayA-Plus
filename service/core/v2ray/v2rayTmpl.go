@@ -854,10 +854,6 @@ func (t *Template) AppendDokodemoTProxy(tproxy string, port int, tag string) {
 		Listen:   "0.0.0.0",
 		Port:     port,
 		Protocol: "dokodemo-door",
-		Sniffing: coreObj.Sniffing{
-			Enabled:      true,
-			DestOverride: []string{"http", "tls"},
-		},
 		Settings: &coreObj.InboundSettings{Network: "tcp,udp"},
 		Tag:      tag,
 	}
@@ -1119,22 +1115,7 @@ func (t *Template) setInbound(setting *configure.Setting) error {
 		}
 	}
 
-	// 设置域名嗅探
-	if setting.InboundSniffing != configure.InboundSniffingDisable && setting.InboundSniffing != "" {
-		enableSniffingRouteOnly := configure.GetSettingNotNil().RouteOnly
-		domainsExcludedText := configure.GetDomainsExcluded()
-		for i := len(t.Inbounds) - 1; i >= 0; i-- {
-			if setting.InboundSniffing == configure.InboundSniffingHttpTLS {
-				t.Inbounds[i].Sniffing.DestOverride = []string{"http", "tls"}
-			} else {
-				t.Inbounds[i].Sniffing.DestOverride = []string{"http", "tls", "quic"}
-			}
-			t.Inbounds[i].Sniffing.DomainsExcluded = strings.Split(domainsExcludedText, "\n")
-			t.Inbounds[i].Sniffing.Enabled = true
-			t.Inbounds[i].Sniffing.RouteOnly = enableSniffingRouteOnly
-		}
-
-	}
+	t.setInboundSniffing(setting, configure.GetDomainsExcluded())
 	return nil
 }
 
@@ -1584,19 +1565,7 @@ func NewTemplate(serverInfos []serverInfo, setting *configure.Setting) (t *Templ
 	tmplJson.Variant, tmplJson.CoreVersion, _ = where.GetV2rayServiceVersion()
 	t = &tmplJson
 	t.Setting = setting
-	// log
-	t.Log = new(coreObj.Log)
-	if logLevel := log.ParseLevel(conf.GetEnvironmentConfig().LogLevel); logLevel >= log.ParseLevel("debug") {
-		t.Log.Loglevel = "info"
-		t.Log.Access = ""
-		t.Log.Error = ""
-	} else if logLevel >= log.ParseLevel("info") {
-		t.Log.Loglevel = "info"
-		t.Log.Access = ""
-		t.Log.Error = "none"
-	} else {
-		t.Log = nil
-	}
+	t.setLog(conf.GetEnvironmentConfig().LogLevel)
 	// resolve Outbounds
 	supportUDP, outboundTags, err := t.resolveOutbounds(serverData)
 	if err != nil {
@@ -1670,6 +1639,8 @@ func NewTemplate(serverInfos []serverInfo, setting *configure.Setting) (t *Templ
 
 	//set inbound listening address and routing
 	t.setDualStack()
+	// Include RoutingA inbounds and IPv6 copies added after setInbound.
+	t.protectVisionSniffing()
 
 	if IsTransparentOn(t.Setting) {
 		switch t.Setting.TransparentType {
@@ -1818,6 +1789,7 @@ func NewEmptyTemplate(setting *configure.Setting) (t *Template) {
 		setting = configure.GetSettingNotNil()
 	}
 	t.Setting = setting
+	t.setLog(conf.GetEnvironmentConfig().LogLevel)
 	return t
 }
 

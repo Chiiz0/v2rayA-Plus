@@ -237,6 +237,7 @@ export default {
     ],
   },
   configureServer: {
+    visionHint: "Vision به Xray نیاز دارد. شنود پروکسی شفاف به‌طور خودکار از RouteOnly برای حفظ مقصد اصلی استفاده می‌کند. برای سرویس اصلی V2RAYA_CORE=xray را تنظیم و سرویس را بازراه‌اندازی کنید؛ برای پروکسی Docker گزینه Xray را انتخاب کنید.",
     title: "پیکربندی سرور | سرور",
     servername: "نام سرور",
     port: "پورت",

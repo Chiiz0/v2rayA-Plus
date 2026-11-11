@@ -308,6 +308,8 @@ export default {
     errNoRules: "至少一条规则需要填写 DNS 服务器",
   },
   configureServer: {
+    visionHint:
+      "Vision 需要 Xray。透明代理嗅探会自动启用 RouteOnly，保留原始目标地址。主服务请设置 V2RAYA_CORE=xray 后重启；Docker 代理请选择 Xray。",
     required: "必填",
     minValue: "不能小于 {value}",
     title: "配置节点",

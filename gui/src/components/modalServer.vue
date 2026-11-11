@@ -168,6 +168,7 @@
             v-if="v2ray.protocol === 'vless'"
             ref="v2ray_flow"
             label="Flow"
+            :message="v2ray.flow.startsWith('xtls-rprx-vision') ? $t('configureServer.visionHint') : ''"
             label-position="on-border"
           >
             <b-input

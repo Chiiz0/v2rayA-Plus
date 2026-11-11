@@ -248,6 +248,7 @@ export default {
     ],
   },
   configureServer: {
+    visionHint: "Vision requires Xray. Transparent proxy sniffing automatically uses RouteOnly to preserve the original destination. For the main service, set V2RAYA_CORE=xray and restart; for Docker proxies, select Xray.",
     title: "Configure Server | Server",
     loadFailed:
       "Failed to load the node. The editor was closed to protect its saved configuration. {message}",

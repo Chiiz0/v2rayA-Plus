@@ -87,6 +87,12 @@ const secured = computed(
       <v-text-field
         v-model="model.flow"
         label="Flow"
+        :hint="
+          model.flow.startsWith('xtls-rprx-vision')
+            ? t('configureServer.visionHint')
+            : undefined
+        "
+        persistent-hint
         :readonly="readonly"
         dir="ltr"
       />

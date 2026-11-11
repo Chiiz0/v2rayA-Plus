@@ -172,27 +172,21 @@ type logInfoWriter struct {
 }
 
 func (w logInfoWriter) Write(p []byte) (n int, err error) {
-	s := string(p)
-	// trim the ending \n
-	length := len(s)
-	if s[length-1] == '\n' {
-		s = s[:length-1]
-	}
-	// print each line separately
-	lines := strings.Split(s, "\n")
-	for _, line := range lines {
-		// remove timestamp
-		fields := strings.SplitN(line, " ", 3)
-		if len(fields) >= 3 {
-			if _, err := time.Parse("2006/01/02 15:04:05", fields[0]+" "+fields[1]); err == nil {
-				log.Info("%v", fields[2])
-			} else {
-				log.Info("%v", line)
-			}
-		} else {
-			log.Info("%v", line)
+	for _, line := range strings.Split(strings.TrimSuffix(string(p), "\n"), "\n") {
+		if line == "" {
+			continue
 		}
-
+		level, message := coreLogLine(line)
+		switch level {
+		case "error":
+			log.Error("%v", message)
+		case "warning":
+			log.Warn("%v", message)
+		case "debug":
+			log.Debug("%v", message)
+		default:
+			log.Info("%v", message)
+		}
 	}
 	return len(p), nil
 }

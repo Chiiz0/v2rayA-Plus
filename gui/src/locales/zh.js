@@ -243,6 +243,7 @@ export default {
     ],
   },
   configureServer: {
+    visionHint: "Vision 需要 Xray。透明代理嗅探会自动启用 RouteOnly，保留原始目标地址。主服务请设置 V2RAYA_CORE=xray 后重启；Docker 代理请选择 Xray。",
     title: "配置节点 | 节点",
     loadFailed: "节点加载失败，编辑器已关闭以保护原配置。{message}",
     invalidSharingAddress: "服务端返回了无效或不支持的节点链接。",

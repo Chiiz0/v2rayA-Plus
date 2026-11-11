@@ -63,6 +63,7 @@ type dockerProxyRuntime struct {
 	VLESSEncryption bool
 	XHTTP           bool
 	RealityMLDSA65  bool
+	Vision          bool
 }
 
 type dockerProxyCoreRuntime struct {
@@ -338,12 +339,9 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 			},
 		},
 	}
-	configBytes, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal config: %w", err)
-	}
-	var vlessEncryption, xhttp, realityMLDSA65 bool
+	var vlessEncryption, xhttp, realityMLDSA65, vision bool
 	for _, outbound := range outbounds {
+		vision = vision || outbound.UsesVision()
 		if stream := outbound.StreamSettings; stream != nil && stream.RealitySettings != nil && stream.RealitySettings.Mldsa65Verify != "" {
 			realityMLDSA65 = true
 		}
@@ -362,6 +360,13 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 			}
 		}
 	}
+	if vision {
+		config.Log = &coreObj.Log{Loglevel: "info", Access: "none"}
+	}
+	configBytes, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
 
 	return &dockerProxyRuntime{
 		ConfigBytes:     configBytes,
@@ -374,6 +379,7 @@ func buildDockerProxyRuntimeForServers(server, front serverObj.ServerObj, coreRu
 		VLESSEncryption: vlessEncryption,
 		XHTTP:           xhttp,
 		RealityMLDSA65:  realityMLDSA65,
+		Vision:          vision,
 	}, nil
 }
 
@@ -432,6 +438,9 @@ func validateDockerProxyConfig(runtime *dockerProxyRuntime) error {
 
 func validateDockerProxyConfigContext(ctx context.Context, runtime *dockerProxyRuntime) error {
 	var features []string
+	if runtime.Vision {
+		features = append(features, "VLESS Vision")
+	}
 	if runtime.VLESSEncryption {
 		features = append(features, "VLESS Encryption")
 	}

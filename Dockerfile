@@ -47,6 +47,6 @@ RUN apk add --no-cache iptables ip6tables nftables iproute2 tzdata docker-cli
 LABEL org.opencontainers.image.source=https://github.com/Chiiz0/v2rayA-Plus
 EXPOSE 2017
 ENV V2RAYA_CONFIG=/etc/v2raya-plus
-ENV V2RAYA_CORE=v2fly
+ENV V2RAYA_CORE=auto
 VOLUME /etc/v2raya-plus
 ENTRYPOINT ["v2raya-plus"]
