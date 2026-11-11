@@ -15,6 +15,12 @@ V2Fly 5.41.0 [未编码 Vision flow，也未实现相应数据帧](https://githu
 
 已加入 [真实核心回归脚本](../scripts/test-vision-transparent.sh)：使用临时证书、本地 HTTPS/Vision 服务端和容器内 nft redirect，不接触宿主防火墙或生产配置。Xray 的 RouteOnly、关闭嗅探、改写目标三个场景均应返回 HTTP 200；V2Fly 5.41.0 的两组旧配置对照均应复现 EOF。另有透明入站、IPv6、FakeDNS 配置保留、核心选择、测速、日志和 Docker 目标/前置代理的单元测试。
 
+### 发布产物核验
+
+发布工作流已通过全部检查，包括新版界面 247 项测试、Go/SQLite 服务测试、race、隔离持久化/回滚和双架构数据库测试。镜像索引摘要为 `sha256:3b379ab3fca07527c4f995e82c470541d941335bcacf25acd984cca73ca8e53e`；两个架构的 revision 均为 `6fa63c6c995adaf3ca9a621efc2c8fd11d7b4875`，`2.6`、`6fa63c6`、`latest` 标签指向同一索引。
+
+已在实际 amd64 发布镜像（Xray 26.11.9、V2Fly 5.41.0）通过上述 5 组 TLS 对照，并用临时 Bolt/SQLite 数据完成 v2.6.0 → v2.6.1 → v2.6.0 演练，验证账户登录、节点、出站、端口及两套界面。新版 Xray 默认使用内置 CA，回归脚本已补充显式信任临时测试证书；运行该镜像的回归时请使用[主分支脚本](https://github.com/Chiiz0/v2rayA-Plus/blob/main/scripts/test-vision-transparent.sh)。这项后续修正只涉及测试证书，不改变发布程序、镜像摘要或版本标签。
+
 ## 旧部署升级到 v2.6.1
 
 以下步骤针对已经运行的 v2.6.0 Docker Compose 部署。更早版本先参照[完整备份文档](database-backup.md)核实工具支持。使用**实际部署目录、Compose 文件和原项目名**，不要用仓库示例覆盖现有文件。保留数据卷、`network_mode: host`、端口、Docker socket、透明代理 hook、代理网络以及数据库后端设置；本次升级不要求切换 Bolt/SQLite。

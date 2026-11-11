@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tidwall/sjson"
 	"github.com/v2rayA/v2rayA/core/coreObj"
 	"github.com/v2rayA/v2rayA/core/serverObj"
 	"github.com/v2rayA/v2rayA/core/v2ray/where"
@@ -75,9 +76,6 @@ func TestVisionRedirectIntegration(t *testing.T) {
 		path := write(fmt.Sprintf("%s-%d.json", binary, port), config)
 		ctx, cancel := context.WithCancel(context.Background())
 		cmd := exec.CommandContext(ctx, binary, "run", "-c", path)
-		// Trust only the disposable fixture certificate without using the
-		// allowInsecure option removed by recent Xray versions.
-		cmd.Env = append(os.Environ(), "SSL_CERT_FILE="+certFile)
 		logFile, err := os.CreateTemp(dir, "core-log-")
 		if err != nil {
 			t.Fatal(err)
@@ -174,7 +172,16 @@ func TestVisionRedirectIntegration(t *testing.T) {
 			if !tc.routeOnly {
 				tmpl.Inbounds[0].Sniffing.RouteOnly = false
 			}
-			start(t, tc.binary, tmpl.ToConfigBytes(), port)
+			// Recent Xray uses bundled roots by default and may ignore
+			// SSL_CERT_FILE. Trust this fixture explicitly on both cores,
+			// without disabling TLS verification or changing production output.
+			clientConfig, err := sjson.SetBytes(tmpl.ToConfigBytes(), "outbounds.0.streamSettings.tlsSettings.certificates", []map[string]string{{
+				"certificateFile": certFile, "usage": "verify",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			start(t, tc.binary, clientConfig, port)
 			targetPort := target.Listener.Addr().(*net.TCPAddr).Port
 			rules := fmt.Sprintf("add table ip vision_test\nadd chain ip vision_test output { type nat hook output priority -100; policy accept; }\nadd rule ip vision_test output ip daddr 127.0.0.1 tcp dport %d meta mark != 128 counter redirect to :%d\n", targetPort, port)
 			nft := exec.Command("nft", "-f", "-")
