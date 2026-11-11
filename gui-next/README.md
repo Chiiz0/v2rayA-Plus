@@ -3,6 +3,8 @@
 Vue 3, Vuetify, Pinia and Vite interface adapted from upstream v2rayA commit
 `1ee48148dd5422f5de8ace837d17883066ac7e67`. This directory is the default UI;
 `../gui` remains available at `/legacy/`. Both use the same authenticated API.
+Selected fixes through upstream `92caf05b` add REALITY ML-DSA-65 (`pqv`)
+editing and update frontend dependencies; see the migration notes for scope.
 
 Use Node.js 24 and Yarn 1.22.22:
 
@@ -24,7 +26,7 @@ A production build supports reverse-proxy path prefixes. Administrative pages
 are served from the deployed binary without installing an offline service worker.
 
 Fork-specific compatibility includes independent Docker SOCKS proxies, front
-proxy chains, V2Fly/Xray selection, SSR, VLESS encryption, and lossless XHTTP extra
+proxy chains, V2Fly/Xray selection, SSR, VLESS encryption, REALITY ML-DSA-65, and lossless XHTTP extra
 parameters. Settings patch only changed supported fields. DNS uses the local
 internal/external list API. Upstream custom inbounds, URL routing imports,
 TUN scripts and explicit pinned outbound selection are not exposed because the

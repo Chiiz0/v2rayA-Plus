@@ -4,6 +4,31 @@
 
 本轮范围不包含上游实体表投影、稳定节点 ID、固定出口组成员选路（pin）、自定义 JSON 入站、DNS rules 架构或远程 RoutingA 自动导入。这些是明确未引入的产品能力，不是本轮交付遗漏；现有 KV 数据契约、Which 引用和 DNS 列表保持兼容。
 
+## 2026-11-11 增量评估
+
+已通过 `git fetch upstream --prune` 核对上游 `main`，评估区间为 `1ee48148..92caf05b`，共 32 个提交（排除 merge 后 21 个）。这里更新的是评估水位；代码按下表适配，不代表已整体合并上游架构。
+
+| 上游变更 | 本地处理与理由 |
+| --- | --- |
+| [7f03ed99](https://github.com/v2rayA/v2rayA/commit/7f03ed99)：legacy mangle 不可用时回退 nft | 已适配到 `service/core/iptables`。自动模式下，只有明确的 mangle 表不存在错误才触发新回退；权限错误、其他错误仍保守处理。探测使用只读 `iptables -t mangle -L -n`，避免地址反查；显式 on/off、Docker 自动模式保持原语义。 |
+| [3e374af9](https://github.com/v2rayA/v2rayA/commit/3e374af9)：VLESS encryption / REALITY ML-DSA-65 | encryption 沿用本地已有完整实现。新增 `pqv` 导入、现代/经典界面编辑、分享、存储和 `mldsa65Verify` 配置输出，覆盖 Docker 主节点与前置节点。旧记录字段缺失时从原始 VLESS URI 恢复；显式空字段持久保存，清空后不会复活。 |
+| [2f71d06a](https://github.com/v2rayA/v2rayA/commit/2f71d06a)、[e858fba5](https://github.com/v2rayA/v2rayA/commit/e858fba5)、[ef3b3aae](https://github.com/v2rayA/v2rayA/commit/ef3b3aae)、[3886be40](https://github.com/v2rayA/v2rayA/commit/3886be40) 及相关锁文件更新 | 现代界面采用 Vite 6.4.5、happy-dom 21.0.4、vue-i18n 11.4.14，并同步 fast-uri 3.1.9、serialize-javascript 7.1.4、follow-redirects 1.16.2、source-map-js 1.2.2。经典界面只同步其依赖范围兼容的 follow-redirects 和 source-map-js，不强行迁入现代界面的依赖主版本。本轮不是经典依赖的全面安全审计。 |
+| [3f39ac10](https://github.com/v2rayA/v2rayA/commit/3f39ac10)、[cd5c339e](https://github.com/v2rayA/v2rayA/commit/cd5c339e)、[12ceb336](https://github.com/v2rayA/v2rayA/commit/12ceb336)：合并核心及 Go 1.27 | 暂不移植。本地通过独立 V2Fly/Xray 可执行文件运行核心，没有上游 `core` Go 模块；继续使用已验证的服务工具链 1.26.10。上游核心依赖及接口变化不适合直接套用到本地旧版插件依赖。 |
+| [92caf05b](https://github.com/v2rayA/v2rayA/commit/92caf05b)、[9e2ca92c](https://github.com/v2rayA/v2rayA/commit/9e2ca92c) 与 nfpm/Alpine/mips 打包调整 | 暂不移植。本地发行矩阵为无 CGO 的 amd64/arm64 Docker 镜像，未发行 LoongArch 或上游格式的 Linux 安装包；现有版本标签发布规则继续适用。 |
+
+ML-DSA-65 要求 Xray 25.7.26 或更新版本，依据 [Xray 首次支持此功能的发行说明](https://github.com/XTLS/Xray-core/releases/tag/v25.7.26)。主核心拒绝 V2Fly 和已知过旧的 Xray；自定义/未知版本沿用现有核心校验路径。Docker 在替换容器前核对**实际镜像**的版本并执行配置校验，拒绝无法识别或过旧的版本；失败不删除已有代理。
+
+回归覆盖旧记录恢复、显式清空、多轮存取、节点/订阅编解码、长公钥与 URL 转义、Docker 双节点配置及失败前保留容器。真实核心检查使用本地 `teddysun/xray:latest`（实际 Xray 26.7.28），有效公钥通过、无效公钥被拒绝；这是隔离容器中的配置验收，不是远端 REALITY 握手测试。运行方式：
+
+```sh
+cd service
+V2RAYA_TEST_REALITY_DOCKER=1 go test ./server/service -run '^TestRealityDockerIntegration$' -count=1 -v
+```
+
+防火墙回退通过模拟命令覆盖，未在 PREEMPT_RT 主机上实际切换防火墙。以上变更不执行数据库迁移或生产部署；仍保留前文列出的功能边界。
+
+本轮验证通过：`CGO_ENABLED=0 go test ./...`、Bolt/SQLite 服务测试、`core/iptables` / `core/serverObj` / `db/configure` / 服务层 race 检测；现代界面类型检查、i18n、lint、47 个测试文件中的 247 项测试及构建；经典节点编辑器测试、修改文件格式检查及构建；真实 Xray 的上述 REALITY 配置校验，以及 XHTTP 普通高级参数、下载分离、前置代理加下载分离三个网络场景。前端构建仍有已有的大 chunk/依赖提示，没有构建失败。
+
 ## 目标与收益
 
 推进顺序为：**XHTTP → Docker 引用一致性 → 完整备份/迁移契约 → SQLite 离线迁移与可回滚运行 → 新界面渐进替换**。界面的 API 契约梳理可并行，界面升级不要求先切库。
